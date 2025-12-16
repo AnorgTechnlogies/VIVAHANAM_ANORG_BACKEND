@@ -1,0 +1,45 @@
+.index.js
+
+# Node.js
+node_modules/
+npm-debug.log
+
+config/config.env
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+.config.env
+
+# Java
+*.class
+*.jar
+*.war
+target/
+*.log
+
+# macOS
+.DS_Store
+
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# IDEs
+.idea/
+*.iml
+
+# Logs
+*.log
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+
+
+.env
+*.env
+config.env
+backup/config/*.env  # Specifically for this backup
+backup/
