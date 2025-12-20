@@ -1153,7 +1153,7 @@ export const deleteTestimonial = async (req, res) => {
   }
 };
 
-// matchmaking controller 
+// matchmaking controller (admin only)
 
 // Create a new matchmaking plan
 export const createMatchmakingPlan = async (req, res) => {

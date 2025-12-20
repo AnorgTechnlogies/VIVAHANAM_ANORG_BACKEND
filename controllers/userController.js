@@ -2574,10 +2574,10 @@ export const getWeddingFormStatus = async (req, res) => {
     const authUserId = req.user?.id || req.user?._id;
     if (!authUserId) {
       return res.status(401).json({
-        success: false,
+      success: false,
         message: 'Authentication required',
-      });
-    }
+    });
+  }
 
     const existing = await WeddingUser.findOne({ userId: authUserId }).lean();
     res.status(200).json({

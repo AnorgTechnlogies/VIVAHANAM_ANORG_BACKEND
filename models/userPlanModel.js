@@ -19,10 +19,6 @@ const userPlanSchema = new mongoose.Schema(
     plan_name: {
       type: String,
       required: [true, "Plan name is required"],
-      enum: {
-        values: ["STARTER", "STANDARD", "PREMIUM", "FAMILY", "SILVER", "GOLD", "PLATINUM", "PAYASGO", "DIAMOND"],
-        message: "Plan must be Starter, Standard, Premium, Family, Silver, Gold, Platinum, PayAsGo, or Diamond",
-      },
       uppercase: true,
       trim: true,
     },
@@ -40,7 +36,8 @@ const userPlanSchema = new mongoose.Schema(
     },
     plan_frequency: {
       type: String,
-      enum: ["monthly", "yearly", "payasgo"],
+    // "custom" added for dynamic plans (arbitrary validity days)
+    enum: ["monthly", "yearly", "payasgo", "custom"],
       lowercase: true,
       required: true,
       default: "monthly",
@@ -48,7 +45,8 @@ const userPlanSchema = new mongoose.Schema(
     payment_mode: {
       type: String,
       required: true,
-      enum: ["RAZORPAY", "UPI", "WALLET"],
+      // PAYPAL ko bhi valid mode me add kiya
+      enum: ["RAZORPAY", "UPI", "WALLET", "PAYPAL"],
       uppercase: true,
     },
     payment_amount: {
@@ -72,13 +70,8 @@ const userPlanSchema = new mongoose.Schema(
     },
     plan_features: {
       type: [String],
-      required: [true, "At least one feature required"],
-      validate: {
-        validator: function (features) {
-          return Array.isArray(features) && features.length > 0;
-        },
-        message: "At least one plan feature is required",
-      },
+      // Testing / special plans ke liye empty features par error na aaye
+      default: [],
     },
     expires_at: { type: Date },
     validForDays: { type: Number },
@@ -99,29 +92,57 @@ const userPlanSchema = new mongoose.Schema(
 );
 
 // ──────────────────────────────────────────────────────────────
-// Pre-validate: Auto-set frequency & expiry based on plan_name
+// Pre-validate: Auto-set frequency & expiry for OLD static plans
+// NOTE: For dynamic admin plans we already set validForDays/expires_at
+//       from MatchmakingPlan, so don't overwrite if they are present.
 // ──────────────────────────────────────────────────────────────
 userPlanSchema.pre("validate", function (next) {
+  // If validity is already set (dynamic MatchmakingPlan), respect it
+  const hasCustomValidity = !!(this.validForDays || this.expires_at);
+  if (hasCustomValidity) {
+    // Just ensure we have some frequency default
+    if (!this.plan_frequency) {
+      this.plan_frequency = this.plan_name === "PAYASGO" ? "payasgo" : "monthly";
+    }
+    return next();
+  }
+
   if (this.isModified("plan_name") || !this.plan_frequency) {
-    // PayAsGo plans (old and new)
+    // PayAsGo plans
     if (this.plan_name === "PAYASGO") {
       this.plan_frequency = "payasgo";
       this.expires_at = null;
-    } 
-    // Yearly plans
-    else if (this.plan_name === "PLATINUM" || this.plan_name === "PREMIUM" || this.plan_name === "FAMILY") {
+    }
+    // Yearly plans (legacy static)
+    else if (
+      this.plan_name === "PLATINUM" ||
+      this.plan_name === "PREMIUM" ||
+      this.plan_name === "FAMILY"
+    ) {
       this.plan_frequency = "yearly";
-      const validityDays = this.plan_name === "FAMILY" ? 365 : 
-                          this.plan_name === "PREMIUM" ? 180 : 365;
-      this.expires_at = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000);
+      const validityDays =
+        this.plan_name === "FAMILY"
+          ? 365
+          : this.plan_name === "PREMIUM"
+          ? 180
+          : 365;
+      this.expires_at = new Date(
+        Date.now() + validityDays * 24 * 60 * 60 * 1000
+      );
       this.validForDays = validityDays;
-    } 
-    // Monthly plans (default)
+    }
+    // Monthly plans (legacy static)
     else {
       this.plan_frequency = "monthly";
-      const validityDays = this.plan_name === "STANDARD" ? 120 : 
-                          this.plan_name === "STARTER" ? 60 : 30;
-      this.expires_at = new Date(Date.now() + validityDays * 24 * 60 * 60 * 1000);
+      const validityDays =
+        this.plan_name === "STANDARD"
+          ? 120
+          : this.plan_name === "STARTER"
+          ? 60
+          : 30;
+      this.expires_at = new Date(
+        Date.now() + validityDays * 24 * 60 * 60 * 1000
+      );
       this.validForDays = validityDays;
     }
   }

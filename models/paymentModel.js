@@ -1,5 +1,7 @@
 // models/transactionModel.js
 import mongoose from "mongoose";
+import User from "../models/userModel.js"; // ✅ ADD THIS
+
 
 const transactionSchema = new mongoose.Schema(
   {
@@ -80,6 +82,12 @@ const transactionSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+
+purchasedProfiles: {
+     type: Number,
+  required: true,
+ },
+
     creditsUsed: {
       type: Number,
       default: 0,

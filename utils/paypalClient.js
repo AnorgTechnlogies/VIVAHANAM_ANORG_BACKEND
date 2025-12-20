@@ -30,22 +30,16 @@ export const client = createPayPalClient();
 
 /**
  * Create PayPal order
+ * Ab yeh full orderData (purchase_units + application_context + intent) accept karega
+ * taaki hum return_url, cancel_url, brand_name, etc. backend se set kar saken.
  */
-export const createOrder = async (amount, currency = 'USD', customId = '') => {
+export const createOrder = async (orderData) => {
   try {
     const request = new paypal.orders.OrdersCreateRequest();
     request.prefer('return=representation');
-    
-    request.requestBody({
-      intent: 'CAPTURE',
-      purchase_units: [{
-        amount: {
-          currency_code: currency,
-          value: amount.toString(),
-        },
-        custom_id: customId,
-      }],
-    });
+
+    // orderData already contains intent, purchase_units, application_context, etc.
+    request.requestBody(orderData);
 
     const response = await client.execute(request);
     return response.result;

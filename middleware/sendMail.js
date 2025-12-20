@@ -1,3 +1,4 @@
+// middleware/sendMail.js - UPDATED WITH ATTACHMENTS SUPPORT
 import nodemailer from 'nodemailer';
 import { config } from 'dotenv';
 config({ path: './config/config.env' });
@@ -7,25 +8,18 @@ let transporter = null;
 const createTransport = async () => {
   if (transporter) return transporter;
 
-  if (process.env.NODEMAILER_SERVICE === 'gmail') {
-    transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.NODEMAILER_SENDING_EMAIL_ADDRESS,
-        pass: process.env.NODEMAILER_SENDING_EMAIL_PASSWORD,
-      },
-    });
-  } else {
-    transporter = nodemailer.createTransport({
-      host: process.env.NODEMAILER_SERVICE_HOST,
-      port: Number(process.env.NODEMAILER_PORT) || 465,
-      secure: process.env.NODEMAILER_SECURE === 'true',
-      auth: {
-        user: process.env.NODEMAILER_SENDING_EMAIL_ADDRESS,
-        pass: process.env.NODEMAILER_SENDING_EMAIL_PASSWORD,
-      },
-    });
-  }
+  transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: process.env.NODEMAILER_SENDING_EMAIL_ADDRESS,
+      pass: process.env.NODEMAILER_SENDING_EMAIL_PASSWORD,
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
 
   return transporter;
 };
@@ -182,7 +176,16 @@ const welcomeTemplate = ({ name }) => `
 </html>
 `;
 
-export const sendEmail = async ({ to, subject, text, html, template, templateData }) => {
+// MAIN SEND EMAIL FUNCTION WITH ATTACHMENTS SUPPORT
+export const sendEmail = async ({ 
+  to, 
+  subject, 
+  text, 
+  html, 
+  template, 
+  templateData, 
+  attachments = []  // NEW: Attachments parameter
+}) => {
   try {
     const transport = await createTransport();
 
@@ -194,6 +197,20 @@ export const sendEmail = async ({ to, subject, text, html, template, templateDat
 
     if (text) mailOptions.text = text;
     if (html) mailOptions.html = html;
+
+    // ADD ATTACHMENTS IF PROVIDED
+    if (attachments && attachments.length > 0) {
+      console.log(`📎 Preparing ${attachments.length} attachment(s) for email`);
+      mailOptions.attachments = attachments.map(attachment => {
+        console.log(`📎 Attachment: ${attachment.filename}, size: ${attachment.content?.length || 0} bytes`);
+        return {
+          filename: attachment.filename,
+          content: attachment.content, // Should be Buffer
+          contentType: attachment.contentType || 'application/pdf',
+          encoding: 'base64' // Important for binary files
+        };
+      });
+    }
 
     // Template-based emails
     if (template === 'verification') {
@@ -211,11 +228,23 @@ export const sendEmail = async ({ to, subject, text, html, template, templateDat
       mailOptions.html = welcomeTemplate(templateData);
     }
 
+    console.log('📧 Sending email with options:', {
+      to,
+      subject: mailOptions.subject,
+      attachments: mailOptions.attachments?.length || 0
+    });
+
     const info = await transport.sendMail(mailOptions);
     console.log('✅ Email sent →', info.messageId, 'to:', to);
+    console.log('✅ Attachments sent:', attachments.length);
     return info;
   } catch (err) {
     console.error('❌ Email send failed →', err);
+    console.error('❌ Error details:', {
+      message: err.message,
+      code: err.code,
+      attachments: attachments?.length || 0
+    });
     throw err;
   }
 };
@@ -242,6 +271,17 @@ export const sendWelcomeEmail = async (to, name) => {
     to,
     template: 'welcome',
     templateData: { name }
+  });
+};
+
+// NEW: Send invoice email with PDF attachment
+export const sendInvoiceEmail = async ({ to, subject, html, attachments }) => {
+  console.log('📧 Sending invoice email with attachments');
+  return sendEmail({
+    to,
+    subject,
+    html,
+    attachments
   });
 };
 
