@@ -979,9 +979,17 @@ export const forgotPassword = async (req, res) => {
 };
 
 // 8. Reset Password
+// 8. Reset Password - FIXED VERSION
 export const resetPassword = async (req, res) => {
   const { email, verificationCode, newPassword } = req.body;
+  
+  console.log("🔧 Reset Password Request Received:");
+  console.log("Email:", email);
+  console.log("Verification Code:", verificationCode);
+  console.log("New Password:", newPassword);
+  
   if (!email || !verificationCode || !newPassword) {
+    console.error("❌ Missing fields");
     return res.status(400).json({
       success: false,
       message: "Email, verification code, and new password are required",
@@ -989,6 +997,7 @@ export const resetPassword = async (req, res) => {
   }
 
   if (newPassword.length < 6) {
+    console.error("❌ Password too short");
     return res.status(400).json({
       success: false,
       message: "Password must be at least 6 characters long",
@@ -996,35 +1005,108 @@ export const resetPassword = async (req, res) => {
   }
 
   try {
+    // Find user by email (case-insensitive)
+    const normalizedEmail = email.toLowerCase().trim();
+    
+    console.log("🔍 Looking for user with email:", normalizedEmail);
+    
     const user = await User.findOne({
-      email: email.toLowerCase().trim(),
-      resetPasswordExpires: { $gt: Date.now() },
+      email: normalizedEmail,
+      resetPasswordExpires: { $gt: Date.now() }, // Check expiration
     }).select("+resetPasswordCode");
 
-    if (!user || !user.resetPasswordCode) {
+    console.log("🔍 User found:", user ? "Yes" : "No");
+    
+    if (!user) {
+      console.error("❌ User not found or OTP expired");
+      return res.status(400).json({
+        success: false,
+        message: "Verification code expired or invalid. Please request a new code.",
+      });
+    }
+
+    console.log("🔍 User's hashed OTP:", user.resetPasswordCode ? "Present" : "Missing");
+    console.log("🔍 OTP expires at:", user.resetPasswordExpires);
+    console.log("🔍 Current time:", Date.now());
+
+    if (!user.resetPasswordCode) {
+      console.error("❌ No OTP found for user");
       return res.status(400).json({
         success: false,
         message: "Verification code expired or invalid",
       });
     }
 
-    const isCodeValid = await bcrypt.compare(verificationCode, user.resetPasswordCode);
+    // Compare the plain text OTP with hashed OTP
+    const isCodeValid = await bcrypt.compare(verificationCode.trim(), user.resetPasswordCode);
+    
+    console.log("🔐 OTP Comparison Result:", isCodeValid);
+    console.log("📧 Input OTP:", verificationCode);
+    console.log("🔑 Stored Hash:", user.resetPasswordCode);
+
     if (!isCodeValid) {
+      console.error("❌ Invalid OTP provided");
       return res.status(400).json({
         success: false,
-        message: "Invalid verification code",
+        message: "Invalid verification code. Please check and try again.",
       });
     }
 
-    user.password = await bcrypt.hash(newPassword, 12);
+    console.log("✅ OTP verified successfully");
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+    
+    // Update user
+    user.password = hashedPassword;
     user.resetPasswordCode = undefined;
     user.resetPasswordExpires = undefined;
     await user.save();
 
-    res.json({ success: true, message: "Password reset successfully" });
+    console.log("✅ Password reset successful for:", user.email);
+
+    // Send confirmation email (optional)
+    try {
+      const mailOptions = {
+        from: EMAIL_USER,
+        to: user.email,
+        subject: "Password Reset Successful - Vedic Indian Vivah",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;">
+            <div style="background: linear-gradient(to right, #059669, #10b981); padding: 25px; text-align: center;">
+              <h1 style="color: white; margin: 0;">Password Reset Successful</h1>
+            </div>
+            <div style="padding: 30px;">
+              <p>Hello ${user.name},</p>
+              <p>Your password has been <strong>successfully reset</strong>.</p>
+              <div style="background: #ecfdf5; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #10b981;">
+                <h3 style="color: #047857; margin-top: 0;">Security Information:</h3>
+                <p>Password reset completed at: ${new Date().toLocaleString()}</p>
+              </div>
+              <p>If you did not request this password reset, please contact our support team immediately.</p>
+            </div>
+          </div>
+        `,
+      };
+      
+      await transport.sendMail(mailOptions);
+      console.log("✅ Confirmation email sent to:", user.email);
+    } catch (emailError) {
+      console.error("⚠️ Failed to send confirmation email:", emailError);
+      // Continue even if email fails
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Password reset successfully. You can now login with your new password." 
+    });
   } catch (error) {
     console.error("❌ Reset password error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    res.status(500).json({ 
+      success: false, 
+      message: "Server error during password reset",
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 };
 

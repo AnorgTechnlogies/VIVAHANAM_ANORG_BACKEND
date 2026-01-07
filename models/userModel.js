@@ -25,6 +25,10 @@ const userSchema = new mongoose.Schema(
     verificationCode: { type: String, select: false },
     verificationCodeExpires: { type: Date, select: false },
 
+    // ✅ ADD THESE 2 LINES: Password Reset Fields
+    resetPasswordCode: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false },
+
     // Profile Status
     profileCompleted: { type: Boolean, default: false },
     role: { type: String, enum: ["user", "admin"], default: "user" },
@@ -59,6 +63,8 @@ const userSchema = new mongoose.Schema(
         delete ret.password;
         delete ret.verificationCode;
         delete ret.verificationCodeExpires;
+         delete ret.resetPasswordCode; // ✅ ADD THIS
+        delete ret.resetPasswordExpires; // ✅ ADD THIS
         return ret;
       }
     }
