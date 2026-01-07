@@ -938,21 +938,36 @@ export const getPaymentSummary = async (req, res) => {
 };
 
 // Download PDF invoice for a transaction (admin or user)
+// Download PDF invoice for a transaction (admin or user)
 export const downloadTransactionPDF = async (req, res) => {
   try {
     const user = await requireAuthenticatedUser(req);
     const { transactionId } = req.params;
 
+    console.log(`🔍 Downloading PDF for transaction: ${transactionId}`);
+
+    // Find transaction with proper population
     const transaction = await Transaction.findById(transactionId)
-      .populate('userId', 'name email vivId')
+      .populate({
+        path: 'userId',
+        select: 'name email vivId profileImage',
+        model: User
+      })
       .lean();
 
     if (!transaction) {
+      console.log('❌ Transaction not found:', transactionId);
       return res.status(404).json({
         success: false,
         message: 'Transaction not found'
       });
     }
+
+    console.log('🔍 Transaction found:', {
+      id: transaction._id,
+      userVivId: transaction.userVivId,
+      userId: transaction.userId
+    });
 
     // Check permission
     if (transaction.userVivId !== user.vivId && user.role !== 'admin') {
@@ -962,16 +977,74 @@ export const downloadTransactionPDF = async (req, res) => {
       });
     }
 
+    // Get user data - try multiple sources
+    let userData = null;
+    
+    // 1. First try from populated userId
+    if (transaction.userId && transaction.userId._id) {
+      console.log('✅ User found from populated userId:', transaction.userId);
+      userData = transaction.userId;
+    } 
+    // 2. Try to find by userVivId
+    else if (transaction.userVivId) {
+      console.log(`🔍 Looking up user by VIV ID: ${transaction.userVivId}`);
+      userData = await User.findOne({ vivId: transaction.userVivId })
+        .select('name email vivId profileImage')
+        .lean();
+      
+      if (userData) {
+        console.log('✅ User found by VIV ID:', userData);
+      } else {
+        console.log('❌ User not found by VIV ID:', transaction.userVivId);
+      }
+    }
+    // 3. Try from metadata
+    if (!userData && transaction.metadata?.userInfo) {
+      console.log('🔍 Using user info from metadata');
+      userData = {
+        name: transaction.metadata.userInfo.name,
+        email: transaction.metadata.userInfo.email,
+        vivId: transaction.userVivId
+      };
+    }
+    // 4. Fallback
+    if (!userData) {
+      console.log('⚠️ Using fallback user data');
+      userData = {
+        name: 'Unknown User',
+        email: 'N/A',
+        vivId: transaction.userVivId || 'N/A'
+      };
+    }
+
+    console.log('✅ Final user data for PDF:', userData);
+
     // Get UserPlan if exists
-    const userPlan = await UserPlan.findOne({
-      $or: [
-        { transactionId: transaction._id },
-        { payment_reference: transaction.paymentReference }
-      ]
-    }).lean();
+    let userPlan = null;
+    if (transaction._id) {
+      userPlan = await UserPlan.findOne({
+        $or: [
+          { transactionId: transaction._id },
+          { payment_reference: transaction.paymentReference }
+        ]
+      }).lean();
+      
+      if (userPlan) {
+        console.log('✅ UserPlan found for transaction');
+      }
+    }
 
     // Create PDF
-    const doc = new PDFDocument({ margin: 40, size: 'A4' });
+    const doc = new PDFDocument({ 
+      margin: 40, 
+      size: 'A4',
+      info: {
+        Title: `Invoice ${transaction._id}`,
+        Author: 'Vivahanam Matchmaking',
+        Subject: 'Payment Receipt'
+      }
+    });
+    
     const buffers = [];
     
     doc.on('data', buffers.push.bind(buffers));
@@ -982,41 +1055,132 @@ export const downloadTransactionPDF = async (req, res) => {
       res.send(pdfBuffer);
     });
 
-    // PDF Content
-    doc.fontSize(20).fillColor('#16a34a').text('Vivahanam - Payment Receipt', { align: 'center' });
-    doc.moveDown();
-    doc.fontSize(12).fillColor('#111827');
+    // ─────────────────────────────────────────────
+    // PDF Content - FIXED USER DATA
+    // ─────────────────────────────────────────────
+    
+    // Header
+    doc.fontSize(20)
+       .fillColor('#16a34a')
+       .text('Vivahanam Matchmaking', { align: 'center' });
+    
+    doc.moveDown(0.5);
+    doc.fontSize(16)
+       .fillColor('#111827')
+       .text('PAYMENT RECEIPT', { align: 'center' });
+    
+    doc.moveDown(1);
+    
+    // Invoice Number & Date
+    doc.fontSize(10)
+       .fillColor('#6b7280')
+       .text(`Invoice #: INV-${transaction._id.toString().slice(-8).toUpperCase()}`, { align: 'right' });
+    
+    doc.text(`Date: ${new Date(transaction.completedAt || transaction.createdAt).toLocaleDateString('en-IN')}`, { align: 'right' });
+    
+    doc.moveDown(2);
+    
+    // User Information - FIXED SECTION
+    doc.fontSize(12)
+       .fillColor('#111827')
+       .text('BILLED TO:', { underline: true });
+    
+    doc.moveDown(0.5);
+    
+    doc.fontSize(11)
+       .fillColor('#374151');
+    
+    // User Name - use actual data
+    doc.text(`User Name: ${userData.name || 'N/A'}`);
+    
+    // Email - use actual data
+    doc.text(`Email: ${userData.email || 'N/A'}`);
+    
+    // VIV ID - use actual data
+    doc.text(`VIV ID: ${userData.vivId || transaction.userVivId || 'N/A'}`);
+    
+    doc.moveDown(2);
+    
+    // Transaction Details
+    doc.fontSize(12)
+       .fillColor('#111827')
+       .text('TRANSACTION DETAILS:', { underline: true });
+    
+    doc.moveDown(0.5);
+    
+    doc.fontSize(11);
     doc.text(`Transaction ID: ${transaction._id}`);
-    doc.text(`Invoice #: INV-${transaction._id.toString().slice(-8).toUpperCase()}`);
-    doc.moveDown();
-    doc.text(`User Name: ${transaction.userId?.name || 'N/A'}`);
-    doc.text(`Email: ${transaction.userId?.email || 'N/A'}`);
-    doc.text(`VIV ID: ${transaction.userId?.vivId || transaction.userVivId}`);
-    doc.moveDown();
-    doc.text(`Plan Name: ${transaction.planName || 'N/A'}`);
-    doc.text(`Plan Code: ${transaction.planCode || 'N/A'}`);
-    doc.text(`Profiles: ${transaction.purchasedProfiles || transaction.creditsAllocated || 0}`);
-    doc.text(`Amount: ${transaction.currency || 'USD'} ${transaction.amount}`);
-    if (userPlan) {
-      doc.text(`Validity: ${userPlan.validForDays || 'N/A'} days`);
-      doc.text(`Expires At: ${userPlan.expires_at ? new Date(userPlan.expires_at).toLocaleDateString() : 'N/A'}`);
+    doc.text(`Plan Name: ${transaction.planName || transaction.planDisplayName || 'N/A'}`);
+    doc.text(`Plan Code: ${transaction.planCode || transaction.planId || 'N/A'}`);
+    
+    // Amount
+    const amount = transaction.amount || transaction.planPrice || 0;
+    const currency = transaction.currency || transaction.planCurrency || 'USD';
+    doc.text(`Amount: ${currency} ${amount.toFixed(2)}`);
+    
+    // Profiles
+    const profiles = transaction.purchasedProfiles || transaction.creditsAllocated || 0;
+    doc.text(`Profiles: ${profiles}`);
+    
+    // Validity
+    if (userPlan?.validForDays) {
+      doc.text(`Validity: ${userPlan.validForDays} days`);
+    } else if (transaction.metadata?.planConfig?.validityDays) {
+      doc.text(`Validity: ${transaction.metadata.planConfig.validityDays} days`);
     }
-    doc.moveDown();
+    
+    // Expiry Date
+    if (userPlan?.expires_at) {
+      doc.text(`Expires At: ${new Date(userPlan.expires_at).toLocaleDateString('en-IN')}`);
+    }
+    
+    doc.moveDown(1);
+    
+    // Payment Information
+    doc.fontSize(12)
+       .fillColor('#111827')
+       .text('PAYMENT INFORMATION:', { underline: true });
+    
+    doc.moveDown(0.5);
+    
+    doc.fontSize(11);
     doc.text(`Payment Method: ${transaction.paymentGateway || 'N/A'}`);
     doc.text(`Payment Reference: ${transaction.paymentReference || 'N/A'}`);
-    doc.text(`Payment Date: ${transaction.completedAt ? new Date(transaction.completedAt).toLocaleString() : 'N/A'}`);
+    doc.text(`Payment Date: ${transaction.completedAt ? new Date(transaction.completedAt).toLocaleString('en-IN') : 'N/A'}`);
     doc.text(`Status: ${transaction.status || 'N/A'}`);
-    doc.moveDown();
-    doc.fontSize(10).fillColor('#6b7280');
-    doc.text('This is a system-generated receipt. It is not a tax invoice.', { align: 'center' });
-    doc.text(`© ${new Date().getFullYear()} Vivahanam. All rights reserved.`, { align: 'center' });
+    
+    doc.moveDown(3);
+    
+    // Footer
+    doc.fontSize(9)
+       .fillColor('#6b7280')
+       .text('─'.repeat(80), { align: 'center' });
+    
+    doc.moveDown(0.5);
+    
+    doc.text('This is a system-generated receipt. For any queries, please contact support@vivahanam.com', { align: 'center' });
+    doc.text(`© ${new Date().getFullYear()} Vivahanam Matchmaking. All rights reserved.`, { align: 'center' });
+    
+    // Add company info
+    doc.moveDown(1);
+    doc.fontSize(8)
+       .fillColor('#9ca3af')
+       .text('Vivahanam Matchmaking Pvt. Ltd.', { align: 'center' });
+    doc.text('support@vivahanam.com | +91 9876543210', { align: 'center' });
 
     doc.end();
+    
+    console.log('✅ PDF generation completed for transaction:', transactionId);
+    
   } catch (error) {
-    console.error('PDF download error:', error);
+    console.error('❌ PDF download error:', error);
+    console.error('❌ Error stack:', error.stack);
+    
+    // Return error response
     res.status(error.statusCode || 500).json({
       success: false,
-      message: error.message || 'Unable to generate PDF'
+      message: error.message || 'Unable to generate PDF',
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };
