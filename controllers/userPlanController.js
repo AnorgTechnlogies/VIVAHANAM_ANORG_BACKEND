@@ -249,22 +249,82 @@ export const buildPlanSummary = (planDoc, userDoc = null) => {
 };
 
 // ✅ EXPORTED: Require authenticated user
+// In userPlanController.js - Update requireAuthenticatedUser function
+// In userPlanController.js - Update ONLY the requireAuthenticatedUser function
+// In userPlanController.js - Update ONLY the requireAuthenticatedUser function
 export const requireAuthenticatedUser = async (req) => {
-  const userId = req.user?.userId || req.user?._id;
-  if (!userId) {
-    const error = new Error("Authentication required");
-    error.statusCode = 401;
-    throw error;
+  console.log('🔍 requireAuthenticatedUser called');
+  console.log('🔍 Request user:', req.user);
+  console.log('🔍 Request admin:', req.admin);
+  console.log('🔍 User ID from request:', req.user?.userId || req.user?._id);
+  
+  // Check if admin is making the request (from adminMiddleware)
+  if (req.admin) {
+    console.log('✅ Admin request detected, returning admin as user');
+    // For admin requests, return the admin object
+    // Admins don't exist in User collection, so we create a user-like object
+    const adminUser = {
+      _id: req.admin._id,
+      vivId: 'ADMIN',
+      name: req.admin.adminName,
+      email: req.admin.adminEmailId,
+      isAdmin: true,
+      role: 'admin',
+      isVerified: true,
+      profileCompleted: true
+    };
+    
+    // Also set req.user for compatibility with other middleware
+    req.user = adminUser;
+    return adminUser;
   }
 
-  const user = await User.findById(userId);
-  if (!user) {
-    const error = new Error("User not found");
-    error.statusCode = 404;
-    throw error;
+  // Check if we already have a user object (from userMiddleware)
+  if (req.user && req.user._id && req.user.email) {
+    console.log('✅ User already attached to request:', req.user.email);
+    
+    // If it's an admin user (from adminMiddleware), return as is
+    if (req.user.vivId === 'ADMIN' || req.user.role === 'admin' || req.user.isAdmin === true) {
+      console.log('✅ Returning admin user from request');
+      return req.user;
+    }
+    
+    // For regular users, verify they exist in User collection
+    try {
+      const dbUser = await User.findById(req.user._id);
+      if (!dbUser) {
+        console.log('❌ User not found in database with ID:', req.user._id);
+        const error = new Error("User not found");
+        error.statusCode = 404;
+        throw error;
+      }
+      console.log('✅ Regular user verified in database:', dbUser.email);
+      return dbUser;
+    } catch (error) {
+      console.error('Error verifying user:', error);
+      throw error;
+    }
   }
 
-  return user;
+  // Fallback: check for user ID in request body/params
+  const userId = req.userId || req.body.userId || req.query.userId;
+  if (userId) {
+    console.log('🔍 Looking for user by ID:', userId);
+    const user = await User.findById(userId);
+    if (!user) {
+      console.log('❌ User not found with ID:', userId);
+      const error = new Error("User not found");
+      error.statusCode = 404;
+      throw error;
+    }
+    req.user = user;
+    return user;
+  }
+
+  console.log('❌ No authentication found in request');
+  const error = new Error("Authentication required");
+  error.statusCode = 401;
+  throw error;
 };
 
 // ✅ EXPORTED: Calculate expiry date

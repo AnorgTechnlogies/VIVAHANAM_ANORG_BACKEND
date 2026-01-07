@@ -1,6 +1,5 @@
 import express from "express";
-import { adminMiddleware } from "../middleware/adminMiddleware.js";
-const router = express.Router();
+import adminMiddleware from "../middleware/adminMiddleware.js";const router = express.Router();
 
 
 import {

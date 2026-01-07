@@ -170,95 +170,226 @@ export const createPayPalOrder = async (req, res) => {
 };
 
 // Get all completed plan purchases (admin only) with filters
+// ✅ Get all completed plan purchases (admin only) with filters
+// In getAllPlanPurchases function - REPLACE the entire function with this:
+
 export const getAllPlanPurchases = async (req, res) => {
   try {
-    const adminUser = await requireAuthenticatedUser(req);
-    if (adminUser.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        message: 'Only admin can view all plan purchases',
-      });
+    console.log('🔍 getAllPlanPurchases - Admin check:', req.admin?.adminEmailId);
+    
+    // For admin routes, we need to handle admin authentication differently
+    if (!req.admin) {
+      console.log('❌ No admin object in request');
+      
+      try {
+        const adminUser = await requireAuthenticatedUser(req);
+        console.log('✅ Got user from requireAuthenticatedUser:', adminUser.email);
+        
+        if (!adminUser.isAdmin && adminUser.role !== 'admin') {
+          return res.status(403).json({
+            success: false,
+            message: 'Only admin can view all plan purchases',
+          });
+        }
+      } catch (authError) {
+        console.error('Auth error:', authError.message);
+        return res.status(403).json({
+          success: false,
+          message: 'Admin authentication required',
+        });
+      }
     }
 
-    const page = Math.max(parseInt(req.query.page || '1', 10), 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit || '25', 10), 1), 100);
-    const { year, month, vivId } = req.query;
+    // Extract parameters
+    const page = Math.max(parseInt(req.query.page || "1", 10), 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit || "25", 10), 1), 100);
+    const { year, month, vivId, status } = req.query;
 
-    // Build query with filters
-    const query = {
-      transactionType: 'PLAN_PURCHASE',
-      status: 'COMPLETED',
-    };
+    console.log('🔍 Query params:', { page, limit, year, month, vivId, status });
+
+    // Build query
+    let query = {};
+
+    // Check different possible status fields
+    const sampleTx = await Transaction.findOne({});
+    if (sampleTx) {
+      if (sampleTx.status !== undefined) {
+        query.status = status || 'COMPLETED';
+      } else if (sampleTx.payment_status !== undefined) {
+        query.payment_status = status || 'COMPLETED';
+      }
+    } else {
+      query.status = 'COMPLETED';
+    }
 
     // Filter by VIV ID
-    if (vivId) {
+    if (vivId && vivId.trim() !== '') {
       query.userVivId = vivId.toUpperCase();
     }
 
     // Filter by year and month
     if (year || month) {
-      const startDate = new Date();
-      const endDate = new Date();
+      query.completedAt = {};
       
       if (year) {
-        startDate.setFullYear(parseInt(year), 0, 1);
-        endDate.setFullYear(parseInt(year), 11, 31, 23, 59, 59);
+        const startDate = new Date(`${year}-01-01T00:00:00.000Z`);
+        const endDate = new Date(`${parseInt(year) + 1}-01-01T00:00:00.000Z`);
+        query.completedAt.$gte = startDate;
+        query.completedAt.$lt = endDate;
       }
       
       if (month) {
-        const monthNum = parseInt(month) - 1; // 0-indexed
-        startDate.setMonth(monthNum, 1);
-        endDate.setMonth(monthNum + 1, 0, 23, 59, 59);
+        const currentYear = year || new Date().getFullYear();
+        const startDate = new Date(`${currentYear}-${month.padStart(2, '0')}-01T00:00:00.000Z`);
+        const endDate = new Date(startDate);
+        endDate.setMonth(endDate.getMonth() + 1);
+        
+        if (query.completedAt.$gte) {
+          if (query.completedAt.$gte < startDate) query.completedAt.$gte = startDate;
+        } else {
+          query.completedAt.$gte = startDate;
+        }
+        
+        if (query.completedAt.$lt) {
+          if (query.completedAt.$lt > endDate) query.completedAt.$lt = endDate;
+        } else {
+          query.completedAt.$lt = endDate;
+        }
       }
-      
-      query.completedAt = {
-        $gte: startDate,
-        $lte: endDate,
-      };
     }
 
-    const [transactions, total] = await Promise.all([
-      Transaction.find(query)
-        .sort({ completedAt: -1, createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .populate('userId', 'name email vivId profileImage')
-        .lean(),
-      Transaction.countDocuments(query),
-    ]);
+    console.log('🔍 Final query:', JSON.stringify(query, null, 2));
 
-    // Get UserPlan data for each transaction
+    // Get total count
+    const total = await Transaction.countDocuments(query);
+    console.log('🔍 Total matching transactions:', total);
+
+    // Get paginated results
+    const skip = (page - 1) * limit;
+    const transactions = await Transaction.find(query)
+      .sort({ completedAt: -1, createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .select('-__v')
+      .lean();
+
+    console.log('🔍 Found transactions:', transactions.length);
+
+    // Enrich transactions with user and plan data
     const enrichedTransactions = await Promise.all(
       transactions.map(async (tx) => {
-        const userPlan = await UserPlan.findOne({
-          $or: [
-            { transactionId: tx._id },
-            { payment_reference: tx.paymentReference }
-          ]
-        })
-        .select('planDisplayName plan_frequency expires_at profilesAllocated profilesRemaining validForDays isActive')
-        .lean();
+        try {
+          console.log(`🔍 Processing transaction ${tx._id}`);
+          console.log('🔍 User VIV ID from tx:', tx.userVivId);
+          console.log('🔍 User ID from tx:', tx.userId);
 
-        return {
-          ...tx,
-          user: tx.userId ? {
-            name: tx.userId.name,
-            email: tx.userId.email,
-            vivId: tx.userId.vivId,
-            profileImage: tx.userId.profileImage
-          } : null,
-          userPlan: userPlan ? {
-            displayName: userPlan.planDisplayName,
-            frequency: userPlan.plan_frequency,
-            expiresAt: userPlan.expires_at,
-            profilesAllocated: userPlan.profilesAllocated,
-            profilesRemaining: userPlan.profilesRemaining,
-            validForDays: userPlan.validForDays,
-            isActive: userPlan.isActive
-          } : null
-        };
+          // Get user data - FIXED: properly find user
+          let userData = null;
+          if (tx.userId && tx.userId.toString().match(/^[0-9a-fA-F]{24}$/)) {
+            console.log(`🔍 Looking up user by ObjectId: ${tx.userId}`);
+            userData = await User.findById(tx.userId).select('name email vivId profileImage').lean();
+          }
+          
+          // If still not found, try by VIV ID
+          if (!userData && tx.userVivId) {
+            console.log(`🔍 Looking up user by VIV ID: ${tx.userVivId}`);
+            userData = await User.findOne({ vivId: tx.userVivId }).select('name email vivId profileImage').lean();
+          }
+          
+          console.log('🔍 Found user data:', userData);
+
+          // Get UserPlan data
+          let userPlanData = null;
+          if (tx._id) {
+            console.log(`🔍 Looking up user plan for transaction: ${tx._id}`);
+            userPlanData = await UserPlan.findOne({
+              $or: [
+                { transactionId: tx._id },
+                { payment_reference: tx.paymentReference }
+              ]
+            })
+            .select('planDisplayName plan_frequency expires_at profilesAllocated profilesRemaining validForDays isActive')
+            .lean();
+            console.log('🔍 Found user plan data:', userPlanData);
+          }
+
+          // Ensure amount and currency fields exist
+          const amount = tx.amount || tx.planPrice || 0;
+          const currency = tx.currency || tx.planCurrency || 'USD';
+          const planName = tx.planName || tx.planDisplayName || tx.plan_name || 'N/A';
+          const planCode = tx.planCode || tx.planId || 'N/A';
+
+          // Get validity from metadata if available
+          let validityDays = null;
+          if (tx.metadata?.planConfig?.validityDays) {
+            validityDays = tx.metadata.planConfig.validityDays;
+          } else if (userPlanData?.validForDays) {
+            validityDays = userPlanData.validForDays;
+          }
+
+          // Build user object with fallbacks
+          const userObject = {
+            _id: userData?._id || null,
+            name: userData?.name || 
+                  tx.metadata?.userInfo?.name || 
+                  (tx.userVivId ? `User ${tx.userVivId}` : 'Unknown User'),
+            email: userData?.email || tx.metadata?.userInfo?.email || 'N/A',
+            vivId: userData?.vivId || tx.userVivId || 'N/A',
+            profileImage: userData?.profileImage || null
+          };
+
+          // Build userPlan object
+          const userPlanObject = userPlanData ? {
+            displayName: userPlanData.planDisplayName,
+            frequency: userPlanData.plan_frequency,
+            expiresAt: userPlanData.expires_at,
+            profilesAllocated: userPlanData.profilesAllocated,
+            profilesRemaining: userPlanData.profilesRemaining,
+            validForDays: userPlanData.validForDays || validityDays,
+            isActive: userPlanData.isActive
+          } : null;
+
+          console.log('🔍 Final enriched object for transaction:', {
+            id: tx._id,
+            user: userObject,
+            validity: validityDays
+          });
+
+          return {
+            ...tx,
+            amount: amount,
+            currency: currency,
+            planName: planName,
+            planCode: planCode,
+            planDisplayName: planName,
+            purchasedProfiles: tx.purchasedProfiles || tx.creditsAllocated || 0,
+            user: userObject,
+            userPlan: userPlanObject
+          };
+        } catch (error) {
+          console.error(`❌ Error enriching transaction ${tx._id}:`, error);
+          return {
+            ...tx,
+            amount: tx.amount || 0,
+            currency: tx.currency || 'USD',
+            planName: tx.planName || 'N/A',
+            planCode: tx.planCode || 'N/A',
+            user: {
+              vivId: tx.userVivId || 'N/A',
+              name: tx.userVivId ? `User ${tx.userVivId}` : 'Unknown User',
+              email: 'N/A'
+            },
+            userPlan: null
+          };
+        }
       })
     );
+
+    // Debug: show what we're sending
+    console.log('🔍 Sending enriched transactions:', enrichedTransactions.length);
+    if (enrichedTransactions.length > 0) {
+      console.log('🔍 First transaction sample:', JSON.stringify(enrichedTransactions[0], null, 2));
+    }
 
     res.json({
       success: true,
@@ -270,13 +401,25 @@ export const getAllPlanPurchases = async (req, res) => {
           limit,
           totalPages: Math.ceil(total / limit) || 1,
         },
+        filters: {
+          year: year || null,
+          month: month || null,
+          vivId: vivId || null
+        }
       },
+      message: enrichedTransactions.length === 0 
+        ? "No plan purchases found with current filters" 
+        : `Found ${enrichedTransactions.length} plan purchase(s)`
     });
+
   } catch (error) {
-    console.error('Get all plan purchases (admin) error:', error);
+    console.error('❌ Get all plan purchases (admin) error:', error);
+    console.error('❌ Error stack:', error.stack);
+    
     res.status(error.statusCode || 500).json({
       success: false,
       message: error.message || 'Unable to fetch plan purchases',
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };

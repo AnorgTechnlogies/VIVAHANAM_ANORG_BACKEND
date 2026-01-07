@@ -25,8 +25,7 @@ import {
   getWeddingFormStatus
 } from "../controllers/userController.js";
 import userMiddleware from "../middleware/userMiddleware.js";
-import { adminMiddleware } from "../middleware/adminMiddleware.js";
-
+import adminMiddleware from "../middleware/adminMiddleware.js";
 const router = express.Router();
 
 // ============================================

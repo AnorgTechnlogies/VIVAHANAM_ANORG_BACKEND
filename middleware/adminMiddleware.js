@@ -49,9 +49,19 @@ const adminMiddleware = async (req, res, next) => {
 
     console.log("Admin authenticated:", admin.adminEmailId, "| Name:", admin.adminName);
     
-    // Attach admin to request
+    // ✅ IMPORTANT: Attach admin to request
     req.admin = admin;
-    req.user = admin; // for compatibility
+    // Also set req.user for compatibility with some functions
+    req.user = {
+      _id: admin._id,
+      vivId: 'ADMIN',
+      name: admin.adminName,
+      email: admin.adminEmailId,
+      isAdmin: true,
+      role: 'admin',
+      isVerified: true,
+      profileCompleted: true
+    };
     
     next();
 
@@ -79,4 +89,4 @@ const adminMiddleware = async (req, res, next) => {
   }
 };
 
-export { adminMiddleware };
+export default adminMiddleware;

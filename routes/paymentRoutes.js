@@ -1,4 +1,3 @@
-// ye payment paypal ke routes hai isme 
 import express from "express";
 import {
   createPayPalOrder,
@@ -11,26 +10,30 @@ import {
   getPaymentSummary,
   downloadTransactionPDF
 } from "../controllers/paymentController.js";
+import adminMiddleware from "../middleware/adminMiddleware.js";
 import userMiddleware from "../middleware/userMiddleware.js";
 
 const router = express.Router();
 
-// PayPal payment routes
+// ✅ PayPal payment routes
 router.post("/create-paypal-order", userMiddleware, createPayPalOrder);
 router.post("/capture-paypal-order", userMiddleware, capturePayPalOrder);
 
-// Transaction history routes
+// ✅ Transaction history routes (for users)
 router.get("/transactions/:vivId", userMiddleware, getUserTransactions);
 router.get("/transaction/:transactionId", userMiddleware, getTransactionById);
-router.get("/plan-purchases", userMiddleware, getAllPlanPurchases);  
 
+// ✅ ADMIN DASHBOARD ROUTES - Use adminMiddleware only
+router.get("/plan-purchases", adminMiddleware, getAllPlanPurchases);
 
-// NEW PAYMENT MANAGEMENT ROUTES FOR ADMIN 
-// yha se admin ke pass matcmakingplanuser ki payment details show ho rhi hai is 3 routes se 
+// ✅ User payment management routes
 router.get("/history/:vivId", userMiddleware, getUserPaymentHistory);
 router.get("/summary/:vivId", userMiddleware, getPaymentSummary);
-router.delete("/:transactionId", userMiddleware, deletePaymentRecord);
-router.get("/pdf/:transactionId", userMiddleware, downloadTransactionPDF);
 
+// ✅ Delete payment record (admin only - fixed middleware)
+router.delete("/:transactionId", adminMiddleware, deletePaymentRecord);
+
+// ✅ Download PDF (both admin and user)
+router.get("/pdf/:transactionId", userMiddleware, downloadTransactionPDF);
 
 export default router;
