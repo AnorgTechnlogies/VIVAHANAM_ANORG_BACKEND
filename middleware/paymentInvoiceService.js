@@ -1,5 +1,6 @@
 // is page me kaam krna hai toh payment controler jha se payment hit / sucess ho rhi(capturePayPalOrder) hai, or mail.js middliware 
 // services/paymentInvoiceService.js
+// change the code to 255-294 tak css or 315-338 tak html code ab line by line information show on register mail 
 import PDFDocument from 'pdfkit';
 import sendEmail from '../middleware/sendMail.js';
 
@@ -186,7 +187,7 @@ export const generateInvoicePDF = async (invoiceData) => {
 export const generateInvoiceEmailHTML = (invoiceData) => {
   const formattedDate = new Date(invoiceData.invoiceDate).toLocaleString('en-IN', {
     day: '2-digit',
-    month: 'long',
+    month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
@@ -244,6 +245,53 @@ export const generateInvoiceEmailHTML = (invoiceData) => {
         .btn { width: 100%; text-align: center; margin: 4px 0; }
         .invoice-details { flex-direction: column; }
         .detail-item { flex: 1 0 100%; }
+
+
+
+
+
+
+
+        .invoice-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.detail-group {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+}
+
+.detail-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: 14px;
+  color: #1f2937;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.detail-value.invoice-number {
+  color: #16a34a;
+}
+
+/* For mobile responsiveness */
+@media (max-width: 600px) {
+  .invoice-details-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
       }
     </style>
   </head>
@@ -262,27 +310,31 @@ export const generateInvoiceEmailHTML = (invoiceData) => {
 
          
 
-          <div class="invoice-box">
-            <p class="invoice-title">${invoiceData.plan.displayName}</p>
-            <div class="invoice-details">
-              <div class="detail-item">
-                <div class="detail-label">Invoice Number</div>
-                <div class="detail-value">${invoiceData.invoiceNumber}</div>
-              </div> 
-              <div class="detail-item">
-                <div class="detail-label">Date</div>
-                <div class="detail-value">${formattedDate}</div>
-              </div>
-              <div class="detail-item">
-                <div class="detail-label">Transaction ID</div>
-                <div class="detail-value">${invoiceData.transactionId}</div>
-              </div>
-              <div class="detail-item">
-                <div class="detail-label">Payment Method</div>
-                <div class="detail-value">${invoiceData.paymentMethod}</div>
-              </div>
-            </div>
-          </div>
+
+
+  <div class="invoice-details-grid">
+  <!-- First row - Invoice Number and Date -->
+  <div class="detail-group">
+    <div class="detail-label">Invoice Number</div>
+    <div class="detail-value invoice-number">${invoiceData.invoiceNumber}</div>
+  </div>
+  
+  <div class="detail-group">
+    <div class="detail-label">Date</div>
+    <div class="detail-value">${formattedDate}</div>
+  </div>
+  
+  <!-- Second row - Transaction ID and Payment Method -->
+  <div class="detail-group">
+    <div class="detail-label">Transaction ID</div>
+    <div class="detail-value">${invoiceData.transactionId}</div>
+  </div>
+  
+  <div class="detail-group">
+    <div class="detail-label">Payment Method</div>
+    <div class="detail-value">${invoiceData.paymentMethod}</div>
+  </div>
+</div>
 
           <table class="table">
             <thead>

@@ -10,25 +10,37 @@ const connectDB = async () => {
       throw new Error("MONGO_URI is not defined in environment variables");
     }
 
-    const conn = await mongoose.connect(process.env.MONGO_URI, {
-    });
+    const conn = await mongoose.connect(process.env.MONGO_URI, {});
 
     console.log(`MongoDB Connected: ${conn.connection.host}`);
 
-    const gracefulShutdown = (signal) => {
-      console.log(`\n${signal} received: Closing MongoDB connection...`);
-      mongoose.connection.close(() => {
+    // const gracefulShutdown = (signal) => {
+    //   console.log(`\n${signal} received: Closing MongoDB connection...`);
+    //   mongoose.connection.close(() => {
+    //     console.log("MongoDB connection closed.");
+    //     process.exit(0);
+    //   });
+    // };
+
+    const gracefulShutdown = async (signal) => {
+      try {
+        console.log(`\n${signal} received: Closing MongoDB connection...`);
+
+        await mongoose.connection.close();
+
         console.log("MongoDB connection closed.");
         process.exit(0);
-      });
+      } catch (err) {
+        console.error("Error closing MongoDB connection:", err);
+        process.exit(1);
+      }
     };
 
     process.on("SIGINT", () => gracefulShutdown("SIGINT"));
     process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-
   } catch (error) {
     console.error("MongoDB Connection Failed:", error.message);
-    process.exit(1); 
+    process.exit(1);
   }
 };
 

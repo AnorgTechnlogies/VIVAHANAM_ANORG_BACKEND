@@ -22,7 +22,8 @@ import {
   logoutDevice,
   createWeddingUser,
   checkContactExists,
-  getWeddingFormStatus
+  getWeddingFormStatus,
+  getPartnersWithoutLogin
 } from "../controllers/userController.js";
 import userMiddleware from "../middleware/userMiddleware.js";
 import adminMiddleware from "../middleware/adminMiddleware.js";
@@ -46,6 +47,8 @@ router.post("/reset-password", resetPassword);
 // Partners route (Public)
 router.get("/partners/filters", userMiddleware, getPartnerFilterOptions);
 router.get("/partners",userMiddleware, getPartners);
+router.get("/partners-withoutlogin", getPartnersWithoutLogin);
+
 
 // Test Email Endpoint
 router.get("/test-email", async (req, res) => {

@@ -6,7 +6,7 @@ import ip from "ip";
 import mongoose from "mongoose";
 import path from 'path';
 import { fileURLToPath } from 'url';
-
+import connectDB from "./config/mongodb.js";
 // Routes
 import userPlanRoutes from "./routes/userPlanRoutes.js";
 import adminRouter from "./routes/adminRoute.js";
@@ -32,17 +32,8 @@ app.use((req, res, next) => {
 });
 
 // 🧩 Connect Database
-const connectDB = async () => {
-  try {
-    const conn = await mongoose.connect(process.env.MONGO_URI);
-    console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
-  } catch (error) {
-    console.error('❌ MongoDB connection error:', error);
-    process.exit(1);
-  }
-};
-
 connectDB();
+
 const isDev = process.env.NODE_ENV === "development";
 
 const baseOrigins = [
@@ -145,7 +136,6 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log("✅ MongoDB & Cloudinary Connected Successfully");
 });
 

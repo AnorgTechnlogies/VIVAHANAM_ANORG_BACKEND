@@ -1527,8 +1527,6 @@ export const bulkVerifyUsers = async (req, res) => {
   }
 };
 
-// 14. Get Partners - Hybrid approach
-// Add this to your userController.js file
 
 // 14. Get Partners - Fixed and Enhanced
 // Enhanced getPartners controller with comprehensive filtering
@@ -1553,20 +1551,20 @@ export const getPartners = async (req, res) => {
       complextion,
       hobbies,
       zodiacSign,
-      zodiacsign, // Accept lowercase version from frontend
+      zodiacsign,
       gotra,
       state,
       city,
       educationLevel,
-      educationlevel, // Accept lowercase educationlevel from frontend
-      fieldofstudy, // Accept fieldofstudy from frontend
+      educationlevel,
+      fieldofstudy,
       citizenshipStatus,
-      citizenshipstatus, // Accept lowercase version from frontend
-      userType, // New field
-      country, // New field
-      languages, // New field
-      height, // Accept height as select filter
-      indianReligious, // Indian Religious Affiliation
+      citizenshipstatus,
+      userType,
+      country,
+      languages,
+      height,
+      indianReligious,
       ageMin,
       ageMax,
       heightMin,
@@ -1593,6 +1591,7 @@ export const getPartners = async (req, res) => {
 
     const andConditions = [];
 
+    // Enhanced search to include all possible fields
     if (search && search.trim()) {
       andConditions.push({
         $or: [
@@ -1601,10 +1600,14 @@ export const getPartners = async (req, res) => {
           { vivId: { $regex: search, $options: "i" } },
           { "formData.firstName": { $regex: search, $options: "i" } },
           { "formData.lastName": { $regex: search, $options: "i" } },
+          { "formData.middleName": { $regex: search, $options: "i" } },
           { "formData.occupation": { $regex: search, $options: "i" } },
+          { "formData.occupationDetails": { $regex: search, $options: "i" } },
           { "formData.country": { $regex: search, $options: "i" } },
           { "formData.state": { $regex: search, $options: "i" } },
           { "formData.city": { $regex: search, $options: "i" } },
+          { "formData.aboutMe": { $regex: search, $options: "i" } },
+          { "formData.familyDetails": { $regex: search, $options: "i" } },
         ],
       });
     }
@@ -1613,113 +1616,108 @@ export const getPartners = async (req, res) => {
       if (!queryValue) return;
       const values = Array.isArray(queryValue) ? queryValue : [queryValue];
       const cleaned = values.filter((value) => value !== undefined && value !== "");
+      
       if (cleaned.length > 0) {
-        const fieldsToCheck = [fieldName, ...alternativeFields];
-        const conditions = fieldsToCheck.map((field) => ({
-          [`formData.${field}`]: { $in: cleaned },
-        }));
+        // Create an array of field checks
+        const fieldChecks = [];
         
-        // If multiple fields, use $or to check any of them
-        if (conditions.length > 1) {
-          andConditions.push({ $or: conditions });
-        } else {
-          andConditions.push(conditions[0]);
-        }
-      }
-    };
-    
-    // Special handler for array fields like languages
-    const addArrayFilterCondition = (fieldName, queryValue) => {
-      if (!queryValue) return;
-      const values = Array.isArray(queryValue) ? queryValue : [queryValue];
-      const cleaned = values.filter((value) => value !== undefined && value !== "");
-      if (cleaned.length > 0) {
-        // For array fields, check if any of the values is in the array
-        andConditions.push({
-          [`formData.${fieldName}`]: { $in: cleaned },
+        // Add primary field name
+        fieldChecks.push({ [`formData.${fieldName}`]: { $in: cleaned } });
+        
+        // Add alternative fields if provided
+        alternativeFields.forEach(altField => {
+          fieldChecks.push({ [`formData.${altField}`]: { $in: cleaned } });
         });
+        
+        // Also check root level fields
+        fieldChecks.push({ [fieldName]: { $in: cleaned } });
+        
+        // If we have multiple fields to check, use $or
+        if (fieldChecks.length > 1) {
+          andConditions.push({ $or: fieldChecks });
+        } else {
+          andConditions.push(fieldChecks[0]);
+        }
       }
     };
 
     const addNumericFilter = (fieldNames, minValue, maxValue) => {
       const numericQuery = {};
-      if (Number.isFinite(minValue)) numericQuery.$gte = minValue;
-      if (Number.isFinite(maxValue)) numericQuery.$lte = maxValue;
+      if (Number.isFinite(minValue)) numericQuery.$gte = Number(minValue);
+      if (Number.isFinite(maxValue)) numericQuery.$lte = Number(maxValue);
       if (Object.keys(numericQuery).length === 0) return;
-      andConditions.push({
-        $or: fieldNames.map((field) => ({
-          [`formData.${field}`]: numericQuery,
-        })),
-      });
+      
+      const fieldChecks = fieldNames.map((field) => ({
+        [`formData.${field}`]: numericQuery,
+      }));
+      
+      andConditions.push({ $or: fieldChecks });
     };
 
+    // Apply all filters
     addFilterCondition("diet", diet);
     addFilterCondition("gender", gender);
     addFilterCondition("religion", religion);
     addFilterCondition("maritalStatus", maritalStatus);
-    // Handle motherTongue - check both camelCase and exact field name
     addFilterCondition("motherTongue", motherTongue, ["mothertongue"]);
     addFilterCondition("caste", caste);
     addFilterCondition("occupation", occupation);
     addFilterCondition("complextion", complextion);
     addFilterCondition("hobbies", hobbies);
-    // Handle zodiacSign - formData uses lowercase "zodiacsign" based on JSON
-    addFilterCondition("zodiacsign", zodiacSign || zodiacsign);
+    addFilterCondition("zodiacsign", zodiacSign || zodiacsign, ["zodiacSign"]);
     addFilterCondition("gotra", gotra);
     addFilterCondition("state", state);
     addFilterCondition("city", city);
-    // Handle educationlevel (lowercase) - check both educationlevel and educationLevel
+    
     const educationLevelValue = educationLevel || educationlevel;
     if (educationLevelValue) {
       addFilterCondition("educationlevel", educationLevelValue, ["educationLevel"]);
     }
-    // Handle fieldofstudy - check fieldofstudy field in formData
-    // Note: fieldofstudy depends on educationLevel but is a separate field
+    
     if (fieldofstudy) {
-      addFilterCondition("fieldofstudy", fieldofstudy);
+      addFilterCondition("fieldofstudy", fieldofstudy, ["fieldOfStudy"]);
     }
-    // Handle citizenshipStatus - formData uses lowercase "citizenshipstatus" based on JSON
-    addFilterCondition("citizenshipstatus", citizenshipStatus || citizenshipstatus);
-    // New fields - use exact field names from JSON
+    
+    const citizenshipValue = citizenshipStatus || citizenshipstatus;
+    if (citizenshipValue) {
+      addFilterCondition("citizenshipstatus", citizenshipValue, ["citizenshipStatus"]);
+    }
+    
     addFilterCondition("userType", userType);
     addFilterCondition("country", country);
-    // Indian Religious Affiliation
     addFilterCondition("indianReligious", indianReligious);
-    // Languages is an array field - need to check if array contains any of the selected values
+    
+    // Handle height as select filter
+    if (height) {
+      addFilterCondition("height", height, ["heightInches", "heightCm", "heightFeet"]);
+    }
+    
+    // Handle languages - special case for array fields
     if (languages) {
       const langValues = Array.isArray(languages) ? languages : [languages];
       const cleanedLangs = langValues.filter((value) => value !== undefined && value !== "");
       if (cleanedLangs.length > 0) {
-        // For array fields, check if the array contains any of the selected values
-        // Try multiple formats: array with $in, or string field that matches
         andConditions.push({
           $or: [
-            // If languages is stored as an array
             { "formData.languages": { $in: cleanedLangs } },
-            // If languages is stored as a single string value (exact match)
-            ...cleanedLangs.map(lang => ({ "formData.languages": lang })),
-            // If languages is stored as a string that contains the value (case-insensitive)
-            ...cleanedLangs.map(lang => ({ "formData.languages": { $regex: lang, $options: "i" } }))
+            { "formData.languages": { $elemMatch: { $in: cleanedLangs } } }
           ]
         });
       }
     }
-    // Handle height as select filter - check multiple possible field names
-    if (height) {
-      addFilterCondition("height", height, ["heightInches", "heightCm"]);
-    }
 
+    // Handle numeric ranges
     const parsedAgeMin = ageMin ? parseInt(ageMin, 10) : null;
     const parsedAgeMax = ageMax ? parseInt(ageMax, 10) : null;
-    if (parsedAgeMin || parsedAgeMax) {
+    if (!isNaN(parsedAgeMin) || !isNaN(parsedAgeMax)) {
       addNumericFilter(["age"], parsedAgeMin, parsedAgeMax);
     }
 
     const parsedHeightMin = heightMin ? parseInt(heightMin, 10) : null;
     const parsedHeightMax = heightMax ? parseInt(heightMax, 10) : null;
-    if (parsedHeightMin || parsedHeightMax) {
+    if (!isNaN(parsedHeightMin) || !isNaN(parsedHeightMax)) {
       addNumericFilter(
-        ["heightInches", "height", "heightCm"],
+        ["heightInches", "height", "heightCm", "heightFeet"],
         parsedHeightMin,
         parsedHeightMax
       );
@@ -1735,10 +1733,9 @@ export const getPartners = async (req, res) => {
     const limitNum = parseInt(limit, 10);
     const skip = (pageNum - 1) * limitNum;
 
+    // Fetch users with all necessary fields
     let partners = await User.find(filter)
-      .select(
-        "-password -verificationCode -verificationCodeExpires -resetPasswordCode -resetPasswordExpires"
-      )
+      .select("name email vivId profileImage profileCompleted isVerified createdAt formData dateOfBirth age")
       .skip(skip)
       .limit(limitNum)
       .sort({ createdAt: -1 })
@@ -1746,10 +1743,11 @@ export const getPartners = async (req, res) => {
 
     console.log(`✅ Found ${partners.length} partners from database`);
 
+    // Helper functions
     const computeAge = (dob) => {
       if (!dob) return null;
       const birthDate = new Date(dob);
-      if (Number.isNaN(birthDate.getTime())) return null;
+      if (isNaN(birthDate.getTime())) return null;
       const today = new Date();
       let age = today.getFullYear() - birthDate.getFullYear();
       const monthDiff = today.getMonth() - birthDate.getMonth();
@@ -1764,12 +1762,12 @@ export const getPartners = async (req, res) => {
       if (typeof value === "number") return value;
       if (typeof value === "string") {
         const numeric = parseFloat(value);
-        if (!Number.isNaN(numeric)) return numeric;
-        const match = value.match(/(\d+)\s*'?(\d+)?/);
+        if (!isNaN(numeric)) return numeric;
+        const match = value.match(/(\d+)\s*'?\s*(\d+)?/);
         if (match) {
           const feet = parseInt(match[1], 10);
           const inches = match[2] ? parseInt(match[2], 10) : 0;
-          if (!Number.isNaN(feet) && !Number.isNaN(inches)) {
+          if (!isNaN(feet) && !isNaN(inches)) {
             return feet * 12 + inches;
           }
         }
@@ -1777,103 +1775,89 @@ export const getPartners = async (req, res) => {
       return null;
     };
 
-    const matchesRange = (value, minValue, maxValue) => {
-      if (value === null || value === undefined) return true;
-      if (Number.isFinite(minValue) && value < minValue) return false;
-      if (Number.isFinite(maxValue) && value > maxValue) return false;
-      return true;
-    };
-
-    // Fetch unlocked profile IDs for this viewer so we can safely reveal
-    // their real profile photos only for those profiles.
-    const unlockedRecords = await ProfileUnlock.find({
-      viewerUserId: currentUserId,
-    })
-      .select("targetUserId")
-      .lean();
-    const unlockedIds = new Set(
-      unlockedRecords.map((rec) => rec.targetUserId.toString())
-    );
-
-    let transformedPartners = partners
-      .map((partner) => {
-        try {
-          let formData = {};
-          if (partner.formData) {
-            if (partner.formData instanceof Map) {
-              formData = Object.fromEntries(partner.formData);
-            } else if (typeof partner.formData === "object") {
-              formData = partner.formData;
-            }
+    // Transform partners
+    let transformedPartners = partners.map((partner) => {
+      try {
+        let formData = {};
+        if (partner.formData) {
+          if (partner.formData instanceof Map) {
+            formData = Object.fromEntries(partner.formData);
+          } else if (typeof partner.formData === "object") {
+            formData = partner.formData;
           }
-
-          const maskedVivId = partner.vivId
-            ? partner.vivId.length > 3
-              ? `${partner.vivId.slice(0, -3)}***`
-              : partner.vivId
-            : "N/A";
-
-          const derivedAge =
-            formData.age ||
-            partner.age ||
-            computeAge(formData.dateOfBirth || partner.dateOfBirth);
-
-          const derivedHeight =
-            parseHeightValue(formData.heightInches) ||
-            parseHeightValue(formData.height) ||
-            parseHeightValue(formData.heightCm);
-
-          const isUnlockedForViewer = unlockedIds.has(
-            partner._id.toString()
-          );
-
-          return {
-            _id: partner._id,
-            vivId: maskedVivId,
-            name: partner.name || "Anonymous",
-            email: partner.email,
-            // IMPORTANT:
-            // - For locked profiles, never send the real image URL.
-            // - For profiles this user has UNLOCKED, we can safely send it.
-            profileImage: isUnlockedForViewer ? partner.profileImage : null,
-            hasProfileImage: !!partner.profileImage,
-            isUnlocked: isUnlockedForViewer,
-            profileCompleted: partner.profileCompleted,
-            firstName: formData.firstName || "",
-            gender: formData.gender || "",
-            diet: formData.diet || "",
-            maritalStatus: formData.maritalStatus || "",
-            religion: formData.religion || "",
-            caste: formData.caste || "",
-            complextion: formData.complextion || "",
-            occupation: formData.occupation || "",
-            country: formData.country || "",
-            state: formData.state || "",
-            city: formData.city || "",
-            motherTongue: formData.motherTongue || "",
-            zodiacSign: formData.zodiacSign || "",
-            gotra: formData.gotra || "",
-            educationLevel: formData.educationLevel || "",
-            citizenshipStatus: formData.citizenshipStatus || "",
-            hobbies: formData.hobbies || [],
-            age: derivedAge,
-            heightInches: derivedHeight,
-            formData,
-          };
-        } catch (error) {
-          console.error("❌ Error transforming partner:", partner._id, error);
-          return null;
         }
-      })
-      .filter((p) => p !== null);
 
+        // Mask VIV ID
+        const maskedVivId = partner.vivId
+          ? partner.vivId.length > 3
+            ? `${partner.vivId.slice(0, -3)}***`
+            : partner.vivId
+          : "N/A";
+
+        // Calculate age
+        const derivedAge = formData.age || partner.age || computeAge(formData.dateOfBirth || partner.dateOfBirth);
+
+        // Calculate height
+        const derivedHeight = parseHeightValue(formData.heightInches) ||
+                              parseHeightValue(formData.height) ||
+                              parseHeightValue(formData.heightCm) ||
+                              parseHeightValue(formData.heightFeet);
+
+        return {
+          _id: partner._id,
+          vivId: maskedVivId,
+          name: partner.name || "Anonymous",
+          email: partner.email,
+          profileImage: partner.profileImage || null,
+          hasProfileImage: !!partner.profileImage,
+          profileCompleted: partner.profileCompleted,
+          isVerified: partner.isVerified,
+          
+          // Extract all relevant fields from formData with fallbacks
+          firstName: formData.firstName || "",
+          lastName: formData.lastName || "",
+          middleName: formData.middleName || "",
+          gender: formData.gender || "",
+          diet: formData.diet || "",
+          maritalStatus: formData.maritalStatus || "",
+          religion: formData.religion || "",
+          caste: formData.caste || "",
+          complextion: formData.complextion || "",
+          occupation: formData.occupation || "",
+          occupationDetails: formData.occupationDetails || "",
+          country: formData.country || "",
+          state: formData.state || "",
+          city: formData.city || "",
+          motherTongue: formData.motherTongue || formData.mothertongue || "",
+          zodiacSign: formData.zodiacSign || formData.zodiacsign || "",
+          gotra: formData.gotra || "",
+          educationLevel: formData.educationLevel || formData.educationlevel || "",
+          fieldofstudy: formData.fieldofstudy || formData.fieldOfStudy || "",
+          citizenshipStatus: formData.citizenshipStatus || formData.citizenshipstatus || "",
+          userType: formData.userType || "",
+          indianReligious: formData.indianReligious || "",
+          hobbies: Array.isArray(formData.hobbies) ? formData.hobbies : 
+                  (typeof formData.hobbies === 'string' ? formData.hobbies.split(',') : []),
+          languages: Array.isArray(formData.languages) ? formData.languages : 
+                    (typeof formData.languages === 'string' ? formData.languages.split(',') : []),
+          aboutMe: formData.aboutMe || "",
+          familyDetails: formData.familyDetails || "",
+          age: derivedAge,
+          heightInches: derivedHeight,
+          formData: formData, // Include full formData for debugging
+        };
+      } catch (error) {
+        console.error("❌ Error transforming partner:", partner._id, error);
+        return null;
+      }
+    }).filter((p) => p !== null);
+
+    // Apply client-side numeric filtering (as backup)
     transformedPartners = transformedPartners.filter((partner) => {
-      const ageOk = matchesRange(partner.age, parsedAgeMin, parsedAgeMax);
-      const heightOk = matchesRange(
-        partner.heightInches,
-        parsedHeightMin,
-        parsedHeightMax
-      );
+      const ageOk = !parsedAgeMin || !parsedAgeMax || 
+                   (partner.age >= parsedAgeMin && partner.age <= parsedAgeMax);
+      const heightOk = !parsedHeightMin || !parsedHeightMax || 
+                      (partner.heightInches >= parsedHeightMin && partner.heightInches <= parsedHeightMax);
       return ageOk && heightOk;
     });
 
@@ -1902,6 +1886,238 @@ export const getPartners = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error fetching partners",
+      error: error.message,
+    });
+  }
+};
+
+// 14.1. Get Partners WITHOUT Login - Public Access
+export const getPartnersWithoutLogin = async (req, res) => {
+  try {
+    console.log("🔓 PUBLIC Partners WITHOUT LOGIN request");
+    console.log("Query Parameters:", req.query);
+
+    const {
+      page = 1,
+      limit = 20,
+      search = "",
+      diet,
+      gender,
+      religion,
+      maritalStatus,
+      motherTongue,
+      caste,
+      occupation,
+      complextion,
+      hobbies,
+    } = req.query;
+
+    console.log("✅ NO authentication required - Public access");
+
+    const query = {
+      profileCompleted: true,
+      isVerified: true,
+    };
+
+    const andConditions = [];
+
+    if (search && search.trim()) {
+      andConditions.push({
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { vivId: { $regex: search, $options: "i" } },
+          { "formData.firstName": { $regex: search, $options: "i" } },
+          { "formData.lastName": { $regex: search, $options: "i" } },
+          { "formData.occupation": { $regex: search, $options: "i" } },
+          { "formData.city": { $regex: search, $options: "i" } },
+        ],
+      });
+    }
+
+    const addFilterCondition = (fieldName, queryValue) => {
+      if (!queryValue) return;
+      const values = Array.isArray(queryValue) ? queryValue : [queryValue];
+      const cleaned = values.filter((value) => value !== undefined && value !== "");
+      if (cleaned.length > 0) {
+        const orConditions = [
+          { [`formData.${fieldName}`]: { $in: cleaned } },
+          { [fieldName]: { $in: cleaned } }
+        ];
+        andConditions.push({ $or: orConditions });
+      }
+    };
+
+    // Add filters
+    addFilterCondition("diet", diet);
+    addFilterCondition("gender", gender);
+    addFilterCondition("religion", religion);
+    addFilterCondition("maritalStatus", maritalStatus);
+    addFilterCondition("motherTongue", motherTongue);
+    addFilterCondition("caste", caste);
+    addFilterCondition("occupation", occupation);
+    addFilterCondition("complextion", complextion);
+    
+    // Handle hobbies array
+    if (hobbies) {
+      const hobbyValues = Array.isArray(hobbies) ? hobbies : [hobbies];
+      const cleanedHobbies = hobbyValues.filter((value) => value !== undefined && value !== "");
+      if (cleanedHobbies.length > 0) {
+        andConditions.push({
+          $or: [
+            { "formData.hobbies": { $in: cleanedHobbies } },
+            { "formData.hobbies": { $elemMatch: { $in: cleanedHobbies } } },
+            { hobbies: { $in: cleanedHobbies } }
+          ]
+        });
+      }
+    }
+
+    if (andConditions.length > 0) {
+      query.$and = andConditions;
+    }
+
+    console.log("🔍 MongoDB PUBLIC filter:", JSON.stringify(query, null, 2));
+
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    // Fetch with ALL necessary fields for public view
+    let partners = await User.find(query)
+      .select("name vivId profileImage profileCompleted isVerified createdAt updatedAt formData gender religion maritalStatus motherTongue caste occupation complextion hobbies country state city age")
+      .skip(skip)
+      .limit(limitNum)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    console.log(`✅ Found ${partners.length} PUBLIC partners (no login)`);
+
+    // Transform for PUBLIC view
+    const publicPartners = partners.map((partner) => {
+      try {
+        // Extract formData
+        let formData = {};
+        if (partner.formData) {
+          if (partner.formData instanceof Map) {
+            formData = Object.fromEntries(partner.formData);
+          } else if (typeof partner.formData === "object") {
+            formData = partner.formData;
+          }
+        }
+
+        // Mask VIV ID for public view
+        const maskedVivId = partner.vivId
+          ? partner.vivId.length > 6
+            ? `${partner.vivId.slice(0, 3)}***${partner.vivId.slice(-3)}`
+            : "***" + partner.vivId.slice(-3)
+          : "N/A";
+
+        // Helper to get field value with priority: formData > root > default
+        const getField = (fieldName, defaultValue = "") => {
+          if (formData[fieldName] !== undefined && formData[fieldName] !== "") {
+            return formData[fieldName];
+          }
+          if (partner[fieldName] !== undefined && partner[fieldName] !== "") {
+            return partner[fieldName];
+          }
+          return defaultValue;
+        };
+
+        // Get array field
+        const getArrayField = (fieldName) => {
+          const formValue = formData[fieldName];
+          const rootValue = partner[fieldName];
+          
+          if (Array.isArray(formValue) && formValue.length > 0) return formValue;
+          if (Array.isArray(rootValue) && rootValue.length > 0) return rootValue;
+          
+          if (typeof formValue === 'string') return formValue.split(',').map(s => s.trim());
+          if (typeof rootValue === 'string') return rootValue.split(',').map(s => s.trim());
+          
+          return [];
+        };
+
+        return {
+          _id: partner._id,
+          vivId: maskedVivId,
+          name: partner.name || getField("firstName", "Anonymous") + " " + getField("lastName", ""),
+          email: null, // Hide email for public
+          
+          // Basic info with fallbacks
+          gender: getField("gender"),
+          religion: getField("religion"),
+          maritalStatus: getField("maritalStatus"),
+          motherTongue: getField("motherTongue"),
+          caste: getField("caste"),
+          occupation: getField("occupation"),
+          complextion: getField("complextion"),
+          hobbies: getArrayField("hobbies"),
+          country: getField("country"),
+          state: getField("state"),
+          city: getField("city"),
+          
+          // Profile image
+          hasProfileImage: !!partner.profileImage,
+          profileImage: partner.profileImage || "/placeholder.jpg",
+          profileCompleted: partner.profileCompleted,
+          isVerified: partner.isVerified,
+          
+          // Additional fields that might be needed
+          age: partner.age || null,
+          createdAt: partner.createdAt,
+          
+          // Flags
+          isPublic: true,
+          isPremium: partner.isPremium || false,
+          currentPlan: partner.currentPlan || null,
+        };
+      } catch (error) {
+        console.error("❌ Error transforming public partner:", error);
+        return null;
+      }
+    }).filter((p) => p !== null);
+
+    const total = await User.countDocuments(query);
+    const totalPages = Math.ceil(total / limitNum);
+
+    console.log(`📊 PUBLIC (no login) response: ${publicPartners.length} partners`);
+
+    // Debug info
+    if (publicPartners.length > 0) {
+      console.log("🔍 First partner sample:", {
+        id: publicPartners[0]._id,
+        vivId: publicPartners[0].vivId,
+        name: publicPartners[0].name,
+        gender: publicPartners[0].gender,
+        occupation: publicPartners[0].occupation,
+        hasProfileImage: publicPartners[0].hasProfileImage,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        partners: publicPartners,
+        pagination: {
+          page: pageNum,
+          totalPages,
+          total,
+          limit: limitNum,
+          showing: publicPartners.length,
+        },
+        message: "Public partners data - No login required",
+        debug: {
+          query: query,
+          totalMatching: total,
+          showing: publicPartners.length
+        }
+      },
+    });
+  } catch (error) {
+    console.error("❌ Fetch PUBLIC partners (no login) error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching public partners",
       error: error.message,
     });
   }
