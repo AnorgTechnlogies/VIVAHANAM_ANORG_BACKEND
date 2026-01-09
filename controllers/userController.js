@@ -2763,19 +2763,7 @@ export const createWeddingUser = async (req, res) => {
       });
     }
 
-    // Check if whatsapp number already exists (if provided)
-    if (userData.whatsappNumber && userData.whatsappNumber.trim() !== '') {
-      const existingByWhatsapp = await WeddingUser.findOne({ 
-        whatsappNumber: userData.whatsappNumber 
-      });
-
-      if (existingByWhatsapp) {
-        return res.status(400).json({
-          success: false,
-          message: 'This WhatsApp number is already registered. Please use a different number.'
-        });
-      }
-    }
+    // WhatsApp number validation removed - allow any WhatsApp number or no WhatsApp number
 
     // Create user data
     const weddingUserData = {
