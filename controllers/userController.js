@@ -262,6 +262,7 @@ const validateDynamicFields = async (formData) => {
 // ==================== CONTROLLER FUNCTIONS ====================
 
 // 1. Simple Signup
+// 1. Simple Signup
 export const simpleSignup = async (req, res) => {
   try {
     console.log("🔍 Simple signup request received");
@@ -278,13 +279,63 @@ export const simpleSignup = async (req, res) => {
 
     // Check if user exists
     const existingUser = await User.findOne({ email: normalizedEmail });
+    
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already registered",
+      // Agar user verified hai to error
+      if (existingUser.isVerified) {
+        return res.status(400).json({
+          success: false,
+          message: "Email already registered",
+        });
+      }
+      
+      // Agar verified nahi hai, to existing user ko update karo
+      console.log(`🔄 Updating unverified user: ${existingUser._id}`);
+      
+      // Generate new verification code
+      const verificationCode = generateVerificationCode();
+      const verificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
+      
+      // Hash new password
+      const hashedPassword = await bcrypt.hash(password, 12);
+      
+      // Update user details
+      existingUser.firstName = firstName;
+      existingUser.lastName = lastName;
+      existingUser.name = `${firstName} ${lastName}`.trim();
+      existingUser.password = hashedPassword;
+      existingUser.verificationCode = verificationCode;
+      existingUser.verificationCodeExpires = verificationCodeExpires;
+      existingUser.updatedAt = new Date();
+      
+      await existingUser.save();
+      
+      // Send new verification email
+      const emailSent = await sendVerificationEmail(
+        normalizedEmail, 
+        verificationCode, 
+        existingUser.name, 
+        existingUser.vivId
+      );
+      
+      if (!emailSent) {
+        return res.status(500).json({
+          success: false,
+          message: "Failed to send verification email. Please try again.",
+        });
+      }
+      
+      return res.status(200).json({
+        success: true,
+        message: "Verification code resent. Please verify your email.",
+        userId: existingUser._id,
+        vivId: existingUser.vivId,
+        email: normalizedEmail,
+        nextStep: "verify-email",
       });
     }
 
+    // NEW USER CREATION (agar existing user nahi hai)
     // Generate unique VIV ID
     const vivId = await generateVivId();
 
