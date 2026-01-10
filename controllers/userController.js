@@ -493,7 +493,181 @@ export const verifyEmail = async (req, res) => {
   }
 };
 
-// 3. Complete Registration with Dynamic Fields
+// 3. Login - UPDATED with proper login tracking
+export const login = async (req, res) => {
+  const clientIp = req.ip || req.connection.remoteAddress || "unknown";
+  const attempt = loginAttempts.get(clientIp) || { count: 0, lockedUntil: null };
+
+  if (attempt.lockedUntil && Date.now() < attempt.lockedUntil) {
+    const mins = Math.ceil((attempt.lockedUntil - Date.now()) / 60000);
+    return res.status(429).json({
+      success: false,
+      message: `Too many attempts. Try again in ${mins} minute(s).`,
+    });
+  }
+
+  const { error, value } = loginSchema.validate(req.body);
+  if (error) {
+    console.error("Login validation error:", error.details);
+    return res.status(400).json({ success: false, message: "Invalid input format", details: error.details });
+  }
+
+  const { loginId, password, deviceId } = value;
+
+  try {
+    // Find user by email or VIV ID
+    const user = await User.findOne({
+      $or: [
+        { email: loginId.toLowerCase().trim() },
+        { vivId: loginId.toUpperCase().trim() }
+      ]
+    }).select("+password");
+
+    // NEW: Check if user exists
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not signed up. Please signup first.",
+      });
+    }
+
+    if (!(await bcrypt.compare(password, user.password))) {
+      const newCount = attempt.count + 1;
+      const lockout = newCount >= MAX_LOGIN_ATTEMPTS;
+      loginAttempts.set(clientIp, {
+        count: newCount,
+        lockedUntil: lockout ? Date.now() + LOCKOUT_TIME : null,
+      });
+      return res.status(401).json({
+        success: false,
+        message: "Invalid login ID -Password",
+      });
+    }
+
+    if (!user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        message: "Please verify your email first.",
+      });
+    }
+
+    loginAttempts.delete(clientIp);
+    
+    // UPDATED: Use instance method to update login time
+    await user.updateLoginTime();
+
+    // Track user login for active status
+    trackUserLogin(user._id);
+
+    // ========== DEVICE SESSION MANAGEMENT ==========
+    // Get device info from request (deviceId from validated value or headers)
+    const currentDeviceId = deviceId || req.headers["x-device-id"] || "unknown";
+    const userAgent = req.headers["user-agent"] || "unknown";
+    const ipAddress = clientIp;
+
+    // Get user's active plan to determine device limit
+    const activePlan = await UserPlan.findOne({
+      userVivId: user.vivId,
+      payment_status: "COMPLETED",
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    // Determine device limit based on plan
+    let deviceLimit = 1; // Default: 1 device (single device login)
+    if (activePlan) {
+      const planName = activePlan.plan_name?.toUpperCase();
+      if (planName === "FAMILY") {
+        deviceLimit = 3; // Family plan: 3 devices
+      } else {
+        deviceLimit = 1; // All other plans: 1 device
+      }
+    }
+
+    // Get active device sessions for this user
+    const activeSessions = await DeviceSession.getActiveSessions(user._id);
+    const activeSessionCount = activeSessions.length;
+
+    // Check if device limit is exceeded
+    if (activeSessionCount >= deviceLimit) {
+      // Find the oldest active session to logout
+      const oldestSession = await DeviceSession.getOldestActiveSession(user._id);
+      
+      if (oldestSession) {
+        // Deactivate the oldest session
+        await oldestSession.deactivate();
+        console.log(`🔄 Auto-logged out oldest session for user ${user.vivId}`);
+      } else {
+        // If no oldest session found, deactivate all and create new one
+        await DeviceSession.deactivateAllSessions(user._id);
+        console.log(`🔄 Deactivated all sessions for user ${user.vivId}`);
+      }
+    }
+
+    // Generate token
+    const token = generateToken(user);
+
+    // Create new device session
+    const deviceInfo = {
+      userAgent,
+      ipAddress,
+      platform: req.headers["sec-ch-ua-platform"] || "unknown",
+      browser: userAgent.split(" ")[0] || "unknown",
+    };
+
+    await DeviceSession.create({
+      userId: user._id,
+      deviceId: currentDeviceId,
+      deviceInfo,
+      token,
+      lastActive: new Date(),
+      loginTime: new Date(),
+      isActive: true,
+    });
+
+    console.log(`✅ User ${user.vivId} logged in successfully (Device: ${currentDeviceId}, Limit: ${deviceLimit})`);
+
+    // Convert formData to object for response
+    let formDataObject = {};
+    if (user.formData) {
+      try {
+        if (user.formData instanceof Map) {
+          formDataObject = Object.fromEntries(user.formData);
+        } else if (user.formData.entries) {
+          formDataObject = Object.fromEntries(user.formData.entries());
+        } else {
+          formDataObject = user.formData;
+        }
+      } catch (error) {
+        console.error("Error converting formData:", error);
+        formDataObject = {};
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Login successful!",
+      token,
+      deviceLimit,
+      activeDevices: activeSessionCount >= deviceLimit ? deviceLimit : activeSessionCount + 1,
+      user: {
+        id: user._id,
+        vivId: user.vivId,
+        name: user.name,
+        email: user.email,
+        profileCompleted: user.profileCompleted,
+        formData: formDataObject,
+        lastLogin: user.lastLogin
+      },
+    });
+  } catch (error) {
+    console.error("❌ Login error:", error);
+    res.status(500).json({ success: false, message: "Server error during login" });
+  }
+};
+
+// 4.  Complete Registration with Dynamic Fields
+
 export const completeRegistration = async (req, res) => {
   try {
     console.log("🔍 Complete registration request received");
@@ -644,171 +818,6 @@ export const completeRegistration = async (req, res) => {
       message: "Server error during registration completion",
       error: error.message,
     });
-  }
-};
-
-// 4. Login - UPDATED with proper login tracking
-export const login = async (req, res) => {
-  const clientIp = req.ip || req.connection.remoteAddress || "unknown";
-  const attempt = loginAttempts.get(clientIp) || { count: 0, lockedUntil: null };
-
-  if (attempt.lockedUntil && Date.now() < attempt.lockedUntil) {
-    const mins = Math.ceil((attempt.lockedUntil - Date.now()) / 60000);
-    return res.status(429).json({
-      success: false,
-      message: `Too many attempts. Try again in ${mins} minute(s).`,
-    });
-  }
-
-  const { error, value } = loginSchema.validate(req.body);
-  if (error) {
-    console.error("Login validation error:", error.details);
-    return res.status(400).json({ success: false, message: "Invalid input format", details: error.details });
-  }
-
-  const { loginId, password, deviceId } = value;
-
-  try {
-    // Find user by email or VIV ID
-    const user = await User.findOne({
-      $or: [
-        { email: loginId.toLowerCase().trim() },
-        { vivId: loginId.toUpperCase().trim() }
-      ]
-    }).select("+password");
-
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      const newCount = attempt.count + 1;
-      const lockout = newCount >= MAX_LOGIN_ATTEMPTS;
-      loginAttempts.set(clientIp, {
-        count: newCount,
-        lockedUntil: lockout ? Date.now() + LOCKOUT_TIME : null,
-      });
-      return res.status(401).json({
-        success: false,
-        message: "Invalid login ID or password",
-      });
-    }
-
-    if (!user.isVerified) {
-      return res.status(403).json({
-        success: false,
-        message: "Please verify your email first.",
-      });
-    }
-
-    loginAttempts.delete(clientIp);
-    
-    // UPDATED: Use instance method to update login time
-    await user.updateLoginTime();
-
-    // Track user login for active status
-    trackUserLogin(user._id);
-
-    // ========== DEVICE SESSION MANAGEMENT ==========
-    // Get device info from request (deviceId from validated value or headers)
-    const currentDeviceId = deviceId || req.headers["x-device-id"] || "unknown";
-    const userAgent = req.headers["user-agent"] || "unknown";
-    const ipAddress = clientIp;
-
-    // Get user's active plan to determine device limit
-    const activePlan = await UserPlan.findOne({
-      userVivId: user.vivId,
-      payment_status: "COMPLETED",
-    })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    // Determine device limit based on plan
-    let deviceLimit = 1; // Default: 1 device (single device login)
-    if (activePlan) {
-      const planName = activePlan.plan_name?.toUpperCase();
-      if (planName === "FAMILY") {
-        deviceLimit = 3; // Family plan: 3 devices
-      } else {
-        deviceLimit = 1; // All other plans: 1 device
-      }
-    }
-
-    // Get active device sessions for this user
-    const activeSessions = await DeviceSession.getActiveSessions(user._id);
-    const activeSessionCount = activeSessions.length;
-
-    // Check if device limit is exceeded
-    if (activeSessionCount >= deviceLimit) {
-      // Find the oldest active session to logout
-      const oldestSession = await DeviceSession.getOldestActiveSession(user._id);
-      
-      if (oldestSession) {
-        // Deactivate the oldest session
-        await oldestSession.deactivate();
-        console.log(`🔄 Auto-logged out oldest session for user ${user.vivId}`);
-      } else {
-        // If no oldest session found, deactivate all and create new one
-        await DeviceSession.deactivateAllSessions(user._id);
-        console.log(`🔄 Deactivated all sessions for user ${user.vivId}`);
-      }
-    }
-
-    // Generate token
-    const token = generateToken(user);
-
-    // Create new device session
-    const deviceInfo = {
-      userAgent,
-      ipAddress,
-      platform: req.headers["sec-ch-ua-platform"] || "unknown",
-      browser: userAgent.split(" ")[0] || "unknown",
-    };
-
-    await DeviceSession.create({
-      userId: user._id,
-      deviceId: currentDeviceId,
-      deviceInfo,
-      token,
-      lastActive: new Date(),
-      loginTime: new Date(),
-      isActive: true,
-    });
-
-    console.log(`✅ User ${user.vivId} logged in successfully (Device: ${currentDeviceId}, Limit: ${deviceLimit})`);
-
-    // Convert formData to object for response
-    let formDataObject = {};
-    if (user.formData) {
-      try {
-        if (user.formData instanceof Map) {
-          formDataObject = Object.fromEntries(user.formData);
-        } else if (user.formData.entries) {
-          formDataObject = Object.fromEntries(user.formData.entries());
-        } else {
-          formDataObject = user.formData;
-        }
-      } catch (error) {
-        console.error("Error converting formData:", error);
-        formDataObject = {};
-      }
-    }
-
-    res.json({
-      success: true,
-      message: "Login successful!",
-      token,
-      deviceLimit,
-      activeDevices: activeSessionCount >= deviceLimit ? deviceLimit : activeSessionCount + 1,
-      user: {
-        id: user._id,
-        vivId: user.vivId,
-        name: user.name,
-        email: user.email,
-        profileCompleted: user.profileCompleted,
-        formData: formDataObject,
-        lastLogin: user.lastLogin
-      },
-    });
-  } catch (error) {
-    console.error("❌ Login error:", error);
-    res.status(500).json({ success: false, message: "Server error during login" });
   }
 };
 
@@ -978,10 +987,11 @@ export const forgotPassword = async (req, res) => {
       ]
     });
 
+    // ✅ NEW: Immediate check for non-existent user
     if (!user) {
-      return res.json({
-        success: true,
-        message: "If account exists, a verification code was sent",
+      return res.status(404).json({
+        success: false,
+        message: "Your email is not registered. Please signup first.",
       });
     }
 
@@ -1029,7 +1039,6 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-// 8. Reset Password
 // 8. Reset Password - FIXED VERSION
 export const resetPassword = async (req, res) => {
   const { email, verificationCode, newPassword } = req.body;
