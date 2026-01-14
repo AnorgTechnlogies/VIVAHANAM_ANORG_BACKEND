@@ -2,7 +2,7 @@
 import { FormField, Datalist } from '../models/AdminRegistrationDynamicModel.js';
 import Admin from '../models/adminModel.js'; 
 
-// ==================== FORM FIELD MANAGEMENT ====================
+// ==================== FORM FIELD MANAGEMENT =============
 
 // Get all form fields with filtering
 export const getFormFields = async (req, res) => {

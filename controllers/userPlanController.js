@@ -250,8 +250,6 @@ export const buildPlanSummary = (planDoc, userDoc = null) => {
 
 // ✅ EXPORTED: Require authenticated user
 // In userPlanController.js - Update requireAuthenticatedUser function
-// In userPlanController.js - Update ONLY the requireAuthenticatedUser function
-// In userPlanController.js - Update ONLY the requireAuthenticatedUser function
 export const requireAuthenticatedUser = async (req) => {
   console.log('🔍 requireAuthenticatedUser called');
   console.log('🔍 Request user:', req.user);
