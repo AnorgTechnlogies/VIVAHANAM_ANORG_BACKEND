@@ -170,7 +170,6 @@ export const createPayPalOrder = async (req, res) => {
 };
 
 // Get all completed plan purchases (admin only) with filters
-// ✅ Get all completed plan purchases (admin only) with filters
 // In getAllPlanPurchases function - REPLACE the entire function with this:
 
 export const getAllPlanPurchases = async (req, res) => {

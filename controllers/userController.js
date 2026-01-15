@@ -1170,7 +1170,7 @@ export const resetPassword = async (req, res) => {
   }
 };
 
-// 9. Get User Info - Dynamic formData + essential static fields
+// 9. Get User Info - Dynamic formData + essential static fields - IMPROVED ERROR HANDLING
 export const getUserInfo = async (req, res) => {
   const userId = req.user?.userId || req.user?.id;
   if (!userId) {
@@ -1178,26 +1178,44 @@ export const getUserInfo = async (req, res) => {
   }
 
   try {
-    const user = await User.findById(userId);
+    // Use lean() with virtuals for better performance - returns plain JavaScript object with virtual fields
+    const user = await User.findById(userId).lean({ virtuals: true });
 
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
-    // Convert formData to object (dynamic data)
+    // Convert formData to object (dynamic data) - IMPROVED ERROR HANDLING
     let formDataObject = {};
     if (user.formData) {
       try {
         if (user.formData instanceof Map) {
           formDataObject = Object.fromEntries(user.formData);
-        } else if (user.formData.entries) {
+        } else if (user.formData && typeof user.formData === 'object' && user.formData.entries) {
           formDataObject = Object.fromEntries(user.formData.entries());
-        } else {
+        } else if (typeof user.formData === 'object' && user.formData !== null) {
           formDataObject = user.formData;
         }
       } catch (error) {
         console.error("Error converting formData:", error);
-        formDataObject = {};
+        formDataObject = {}; // Fallback to empty object
+      }
+    }
+
+    // Calculate age manually if not available (for lean queries)
+    let calculatedAge = user.age || null;
+    if (!calculatedAge && formDataObject.dateOfBirth) {
+      try {
+        const today = new Date();
+        const birthDate = new Date(formDataObject.dateOfBirth);
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
+        }
+        calculatedAge = age;
+      } catch (e) {
+        calculatedAge = null;
       }
     }
 
@@ -1231,9 +1249,11 @@ export const getUserInfo = async (req, res) => {
       // Dynamic formData fields
       ...formDataObject,
       
-      // Virtual fields
-      age: user.age,
-      isOnline: user.isOnline
+      // Virtual fields - calculated or from lean query
+      age: calculatedAge,
+      isOnline: user.isOnline || false,
+      updatedAt: user.updatedAt,
+      createdAt: user.createdAt
     };
 
     res.json({ 
@@ -1242,7 +1262,13 @@ export const getUserInfo = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Fetch user info error:", error);
-    res.status(500).json({ success: false, message: "Server error" });
+    // Return more specific error messages
+    const errorMessage = error.message || "Server error occurred while fetching user information";
+    res.status(500).json({ 
+      success: false, 
+      message: errorMessage,
+      error: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
@@ -2460,29 +2486,45 @@ export const logout = async (req, res) => {
   }
 };
 
-// 16. Activity Tracking Middleware - UPDATED
+// 16. Activity Tracking Middleware - UPDATED - OPTIMIZED FOR PERFORMANCE
 export const trackActivity = async (req, res, next) => {
   try {
     const userId = req.user?.userId;
     
     if (userId) {
-      // Update last active timestamp in session
+      // Update last active timestamp in session (in-memory, no DB hit)
       trackUserActivity(userId);
       
-      // Update lastLogin in database periodically (every 10 minutes)
-      const user = await User.findById(userId);
-      if (user) {
+      // Update lastLogin in database periodically (every 10 minutes) - OPTIMIZED
+      // Use atomic updateOne instead of findById + save to prevent connection pool exhaustion
+      try {
         const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
-        if (!user.lastLogin || user.lastLogin < tenMinutesAgo) {
-          user.lastLogin = new Date();
-          await user.save({ validateBeforeSave: false });
-        }
+        
+        // Atomic update - only if condition is met (more efficient, prevents race conditions)
+        await User.updateOne(
+          {
+            _id: userId,
+            $or: [
+              { lastLogin: { $exists: false } },
+              { lastLogin: { $lt: tenMinutesAgo } }
+            ]
+          },
+          {
+            $set: {
+              lastLogin: new Date()
+            }
+          }
+        ); // Atomic operation - no need for lean() on updateOne
+      } catch (dbError) {
+        // Log but don't block the request if DB update fails
+        console.error("❌ Activity tracking DB update error (non-blocking):", dbError.message);
       }
     }
     
     next();
   } catch (error) {
     console.error("❌ Activity tracking error:", error);
+    // Always call next() to not block the request
     next();
   }
 };
