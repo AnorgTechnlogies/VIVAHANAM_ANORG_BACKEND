@@ -668,6 +668,7 @@ export const login = async (req, res) => {
 
 // 4.  Complete Registration with Dynamic Fields
 
+
 export const completeRegistration = async (req, res) => {
   try {
     console.log("🔍 Complete registration request received");
@@ -680,21 +681,32 @@ export const completeRegistration = async (req, res) => {
       });
     }
 
-    const { formData, profileImage, documents } = req.body;
+    // IMPORTANT: profileImages (array) not profileImage (single)
+    const { formData, profileImages, documents } = req.body;
 
     console.log("📋 Form data received:", Object.keys(formData || {}));
-    console.log("🖼️ Profile image:", profileImage ? "Present" : "Missing");
-    console.log("📄 Documents:", documents ? `${documents.length} documents` : "Missing");
+    console.log("🖼️ Profile images count:", profileImages ? profileImages.length : 0);
+    console.log("📄 Documents count:", documents ? documents.length : 0);
 
-    // Validate required files
-    if (!profileImage) {
+    // Validate profile images array
+    if (!profileImages || !Array.isArray(profileImages) || profileImages.length === 0) {
       return res.status(400).json({
         success: false,
-        message: "Profile image is required",
+        message: "At least one profile image is required",
       });
     }
 
-    if (!documents || documents.length === 0) {
+    // Validate maximum number of profile images (3)
+    const MAX_PROFILE_IMAGES = 3;
+    if (profileImages.length > MAX_PROFILE_IMAGES) {
+      return res.status(400).json({
+        success: false,
+        message: `Maximum ${MAX_PROFILE_IMAGES} profile images allowed`,
+      });
+    }
+
+    // Validate documents
+    if (!documents || !Array.isArray(documents) || documents.length === 0) {
       return res.status(400).json({
         success: false,
         message: "At least one document is required",
@@ -731,30 +743,46 @@ export const completeRegistration = async (req, res) => {
 
     console.log("📤 Uploading files to Cloudinary...");
 
-    // Upload profile image
-    const profileUploadResult = await uploadBase64Image(profileImage);
-    if (!profileUploadResult.success) {
+    // Upload ALL profile images
+    const profileUploadPromises = profileImages.map((base64Image, index) => {
+      console.log(`📸 Uploading profile image ${index + 1}/${profileImages.length}`);
+      const publicId = `profile_${userId}_${Date.now()}_${index}`;
+      return uploadBase64Image(base64Image, publicId);
+    });
+    
+    const profileUploadResults = await Promise.all(profileUploadPromises);
+    
+    // Check for failed uploads
+    const failedProfileUploads = profileUploadResults.filter(result => !result.success);
+    if (failedProfileUploads.length > 0) {
+      console.error("❌ Failed profile image uploads:", failedProfileUploads);
       return res.status(500).json({
         success: false,
-        message: "Failed to upload profile image",
-        error: profileUploadResult.error
+        message: "Failed to upload some profile images",
+        errors: failedProfileUploads.map(result => result.error)
       });
     }
 
     // Upload documents
-    const documentUploadPromises = documents.map(doc => uploadBase64Document(doc));
+    const documentUploadPromises = documents.map((base64Doc, index) => {
+      console.log(`📄 Uploading document ${index + 1}/${documents.length}`);
+      const publicId = `doc_${userId}_${Date.now()}_${index}`;
+      return uploadBase64Document(base64Doc, publicId);
+    });
+    
     const documentUploadResults = await Promise.all(documentUploadPromises);
     
-    const failedUploads = documentUploadResults.filter(result => !result.success);
-    if (failedUploads.length > 0) {
+    const failedDocumentUploads = documentUploadResults.filter(result => !result.success);
+    if (failedDocumentUploads.length > 0) {
+      console.error("❌ Failed document uploads:", failedDocumentUploads);
       return res.status(500).json({
         success: false,
         message: "Failed to upload some documents",
-        errors: failedUploads.map(result => result.error)
+        errors: failedDocumentUploads.map(result => result.error)
       });
     }
 
-    // Extract essential fields for top-level storage (for querying)
+    // Extract essential fields for top-level storage
     const essentialFields = {
       mobileNo: formData.mobileNo || '',
       gender: formData.gender || '',
@@ -766,24 +794,63 @@ export const completeRegistration = async (req, res) => {
       country: formData.country || '',
     };
 
-    // Update user with both essential fields and formData
+    // Prepare profile images data for database
+    const profileImagesData = profileUploadResults.map((result, index) => ({
+      url: result.url,
+      publicId: result.publicId,
+      isPrimary: index === 0, // First image is primary
+      order: index,
+      uploadedAt: new Date()
+    }));
+
+    // Prepare additional images (for formData access)
+    const additionalImages = profileImagesData.slice(1).map(img => img.url);
+    const additionalImagePublicIds = profileImagesData.slice(1).map(img => img.publicId);
+
+    // Update formData with additional images if needed
+    const updatedFormData = {
+      ...formData,
+      additionalImages: additionalImages,
+    };
+
+    // Update user with all data
     const updateData = {
       ...essentialFields,
-      formData: new Map(Object.entries(formData || {})),
-      profileImage: profileUploadResult.url,
-      profileImagePublicId: profileUploadResult.publicId,
+      formData: new Map(Object.entries(updatedFormData)),
+      
+      // For backward compatibility - single image
+      profileImage: profileImagesData[0]?.url || '',
+      profileImagePublicId: profileImagesData[0]?.publicId || '',
+      
+      // Multiple profile images
+      profileImages: profileImagesData,
+      profileImagesCount: profileImagesData.length,
+      
+      // Additional images arrays
+      additionalImages: additionalImages,
+      additionalImagePublicIds: additionalImagePublicIds,
+      
+      // Documents
       documents: documentUploadResults.map(result => result.url),
       documentPublicIds: documentUploadResults.map(result => result.publicId),
-      profileCompleted: true
+      
+      // Profile status
+      profileCompleted: true,
+      lastProfileUpdate: new Date()
     };
 
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { $set: updateData },
-      { new: true, runValidators: true }
-    ).select("-password -verificationCode -verificationCodeExpires");
+      { 
+        new: true, 
+        runValidators: true,
+        select: "-password -verificationCode -verificationCodeExpires -resetPasswordCode -resetPasswordExpires"
+      }
+    );
 
     console.log(`✅ Registration completed for VIV ID: ${updatedUser.vivId}`);
+    console.log(`📸 Successfully uploaded ${profileImagesData.length} profile images`);
 
     // Convert formData for response
     let formDataObject = {};
@@ -804,10 +871,11 @@ export const completeRegistration = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Registration completed successfully!",
+      message: `Registration completed successfully! ${profileImagesData.length} profile images uploaded.`,
       user: {
         ...updatedUser.toObject(),
-        formData: formDataObject
+        formData: formDataObject,
+        profileImagesCount: profileImagesData.length
       },
       nextStep: "/dashboard",
     });

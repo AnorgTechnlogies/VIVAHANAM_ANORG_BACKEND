@@ -87,6 +87,29 @@ const matchmakingPlanSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+
+    // Optional: mark plan as special free / trial plan
+    isFreeTrial: {
+      type: Boolean,
+      default: false,
+    },
+
+    // Optional: control visibility window for free / promotional plans
+    freeFrom: {
+      type: Date,
+    },
+    freeTo: {
+      type: Date,
+    },
+
+    // Optional: restrict visibility to specific users (by vivId)
+    allowedVivIds: [
+      {
+        type: String,
+        uppercase: true,
+        trim: true,
+      },
+    ],
     creditRate: {
       type: String,
       trim: true,
@@ -123,4 +146,3 @@ const MatchmakingPlan =
   mongoose.model("MatchmakingPlan", matchmakingPlanSchema);
 
 export default MatchmakingPlan;
-

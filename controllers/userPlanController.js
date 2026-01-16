@@ -871,8 +871,11 @@ export const getUnlockHistory = async (req, res) => {
 
 // ✅ EXPORTED: Get plan catalog
 // ✅ EXPORTED: Get plan catalog - ONLY DATABASE DATA
-export const getPlanCatalog = async (_req, res) => {
+export const getPlanCatalog = async (req, res) => {
   try {
+    const now = new Date();
+    const currentVivId = req.user?.vivId;
+
     // Fetch only active plans from database
     const dbPlans = await MatchmakingPlan.find({ isActive: true })
       .sort({ order: 1, createdAt: -1 })
@@ -896,6 +899,38 @@ export const getPlanCatalog = async (_req, res) => {
       const key = (plan.planCode || "").toLowerCase();
       const profiles = plan.profiles || plan.profilesAllocated || 0;
       const price = plan.price || plan.planPrice || 0;
+
+      // Visibility rules for zero-amount / free trial plans
+      if (price === 0) {
+        const {
+          freeFrom,
+          freeTo,
+          allowedVivIds = [],
+        } = plan;
+
+        // Time-based visibility window
+        if (freeFrom && now < freeFrom) {
+          return null;
+        }
+        if (freeTo && now > freeTo) {
+          return null;
+        }
+
+        // Per-user visibility restriction (by vivId)
+        if (
+          Array.isArray(allowedVivIds) &&
+          allowedVivIds.length > 0 &&
+          currentVivId
+        ) {
+          const upperVivId = currentVivId.toUpperCase();
+          const allowedSet = new Set(
+            allowedVivIds.map((v) => (v || "").toUpperCase())
+          );
+          if (!allowedSet.has(upperVivId)) {
+            return null;
+          }
+        }
+      }
       
       return {
         id: key,
@@ -922,7 +957,7 @@ export const getPlanCatalog = async (_req, res) => {
           ? `$${(price / profiles).toFixed(2)} per credit`
           : null,
       };
-    });
+    }).filter(Boolean);
 
     return res.json({
       success: true,
