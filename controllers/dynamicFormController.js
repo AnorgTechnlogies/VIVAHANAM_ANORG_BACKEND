@@ -1,6 +1,8 @@
 // controllers/dynamicFormController.js
 import { FormField, Datalist } from '../models/AdminRegistrationDynamicModel.js';
 import Admin from '../models/adminModel.js'; 
+import User from "../models/userModel.js";
+
 
 // ==================== FORM FIELD MANAGEMENT =============
 
@@ -796,3 +798,226 @@ export const importFormConfiguration = async (req, res) => {
     });
   }
 };
+
+
+// userController.js में नया function (अंत में add करें)
+
+// Field Type Migration Controller
+export const migrateFieldType = async (req, res) => {
+  try {
+    const { fieldId } = req.params;
+    const { newType, oldType, fieldName } = req.body;
+
+    console.log(`🔄 Starting field type migration for: ${fieldName} (${oldType} → ${newType})`);
+
+    // Step 1: Field update in FormField collection
+    const updatedField = await FormField.findByIdAndUpdate(
+      fieldId,
+      { type: newType, updatedAt: Date.now() },
+      { new: true }
+    );
+
+    if (!updatedField) {
+      return res.status(404).json({
+        success: false,
+        message: 'Field not found in FormField collection'
+      });
+    }
+
+    // Step 2: Migrate ALL users' data for this field
+    const migrationResult = await migrateUserDataForField(fieldName, oldType, newType);
+
+    // Step 3: Clear cache
+    clearFormCache();
+
+    res.json({
+      success: true,
+      message: `✅ Field type updated to ${newType}. ${migrationResult.migrated} users migrated, ${migrationResult.failed} failed.`,
+      data: {
+        field: updatedField,
+        migration: migrationResult
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Field type migration error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Migration failed: ' + error.message
+    });
+  }
+};
+
+// Helper: Migrate user data
+async function migrateUserDataForField(fieldName, oldType, newType) {
+  try {
+    console.log(`📊 Looking for users with field: ${fieldName}`);
+    
+    // Find users who have this field in their formData
+    const users = await User.find({
+      [`formData.${fieldName}`]: { $exists: true }
+    });
+
+    console.log(`👥 Found ${users.length} users with field ${fieldName}`);
+
+    let migrated = 0;
+    let failed = 0;
+    const migrationLog = [];
+
+    for (const user of users) {
+      try {
+        const oldValue = user.formData.get(fieldName);
+        
+        if (oldValue !== undefined && oldValue !== null) {
+          // Convert the value based on type change
+          const newValue = convertDataType(oldValue, oldType, newType, fieldName);
+          
+          // Update user's formData
+          user.formData.set(fieldName, newValue);
+          await user.save();
+          
+          migrated++;
+          migrationLog.push({
+            userId: user._id,
+            vivId: user.vivId,
+            oldValue,
+            newValue,
+            success: true
+          });
+          
+          if (migrated % 100 === 0) {
+            console.log(`✅ Migrated ${migrated}/${users.length} users...`);
+          }
+        }
+      } catch (userError) {
+        console.error(`❌ Failed to migrate user ${user.vivId}:`, userError.message);
+        failed++;
+        migrationLog.push({
+          userId: user._id,
+          vivId: user.vivId,
+          error: userError.message,
+          success: false
+        });
+      }
+    }
+
+    console.log(`🎉 Migration complete: ${migrated} successful, ${failed} failed`);
+    
+    return {
+      totalUsers: users.length,
+      migrated,
+      failed,
+      log: migrationLog.slice(0, 10) // First 10 entries only
+    };
+
+  } catch (error) {
+    console.error('❌ Migration helper error:', error);
+    throw error;
+  }
+}
+
+// Helper: Convert data types
+function convertDataType(value, fromType, toType, fieldName) {
+  // If value is already null/undefined, return empty based on type
+  if (value === null || value === undefined) {
+    switch (toType) {
+      case 'text': return '';
+      case 'number': return 0;
+      case 'checkbox': return false;
+      case 'select': 
+      case 'radio': 
+      case 'datalist': return '';
+      case 'date': return '';
+      default: return '';
+    }
+  }
+
+  const stringValue = String(value).trim();
+
+  // Common conversions
+  switch (fromType) {
+    case 'text':
+      switch (toType) {
+        case 'number':
+          const num = Number(stringValue);
+          return isNaN(num) ? 0 : num;
+        case 'checkbox':
+          return stringValue.toLowerCase() === 'true' || 
+                 stringValue === '1' || 
+                 stringValue.toLowerCase() === 'yes';
+        case 'select':
+        case 'radio':
+        case 'datalist':
+          // Return as is, will be validated by frontend
+          return stringValue;
+        case 'date':
+          // Try to parse date
+          const date = new Date(stringValue);
+          return isNaN(date.getTime()) ? '' : date.toISOString().split('T')[0];
+        default:
+          return stringValue;
+      }
+
+    case 'number':
+      switch (toType) {
+        case 'text':
+          return stringValue;
+        case 'checkbox':
+          return Number(value) !== 0;
+        case 'select':
+        case 'radio':
+          return stringValue;
+        default:
+          return value;
+      }
+
+    case 'select':
+    case 'radio':
+      switch (toType) {
+        case 'text':
+          return stringValue;
+        case 'checkbox':
+          return stringValue !== '' && stringValue !== '0' && stringValue.toLowerCase() !== 'false';
+        case 'number':
+          const num = Number(stringValue);
+          return isNaN(num) ? 0 : num;
+        default:
+          return value;
+      }
+
+    case 'checkbox':
+      const boolValue = Boolean(value);
+      switch (toType) {
+        case 'text':
+          return boolValue ? 'Yes' : 'No';
+        case 'number':
+          return boolValue ? 1 : 0;
+        case 'select':
+        case 'radio':
+          return boolValue ? 'true' : 'false';
+        default:
+          return value;
+      }
+
+    case 'date':
+      switch (toType) {
+        case 'text':
+          return stringValue;
+        case 'number':
+          const date = new Date(stringValue);
+          return isNaN(date.getTime()) ? 0 : date.getTime();
+        default:
+          return value;
+      }
+
+    default:
+      // For any other type or same type
+      return value;
+  }
+}
+
+// Clear form cache
+function clearFormCache() {
+  // Add your cache clearing logic here
+  console.log('🧹 Form cache cleared');
+}

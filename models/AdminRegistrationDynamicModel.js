@@ -1,4 +1,3 @@
-// models/AdminRegistrationDynamicModel.js
 import mongoose from 'mongoose';
 
 const validationSchema = new mongoose.Schema({
@@ -14,7 +13,8 @@ const validationSchema = new mongoose.Schema({
 const optionSchema = new mongoose.Schema({
   label: { type: String, required: true },
   value: { type: String, required: true },
-  isActive: { type: Boolean, default: true }
+  isActive: { type: Boolean, default: true },
+  _id: { type: mongoose.Schema.Types.ObjectId, auto: true }
 });
 
 const datalistSchema = new mongoose.Schema({
@@ -40,7 +40,7 @@ const formFieldSchema = new mongoose.Schema({
     required: true,
     enum: [
       'text', 'email', 'mobileNo', 'number', 'date', 'select', 
-      'radio', 'checkbox', 'textarea', 'file', 'datalist'
+      'radio', 'checkbox', 'textarea', 'file', 'datalist', 'multiselect'
     ]
   },
   
@@ -69,10 +69,12 @@ const formFieldSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true },
   isRequired: { type: Boolean, default: false },
   
-  // Options for select/radio/datalist
+  // MULTI-SELECT SUPPORT for checkbox groups
+  isMultiple: { type: Boolean, default: false },
+  
+  // Options for select/radio/datalist/multiselect
   options: [optionSchema],
   datalistId: { type: String },
-  isMultiple: { type: Boolean, default: false },
   
   // Validation rules
   validation: validationSchema,
@@ -96,14 +98,36 @@ formFieldSchema.index({ section: 1, fieldOrder: 1 });
 formFieldSchema.index({ isActive: 1 });
 formFieldSchema.index({ section: 1, isActive: 1 });
 
-// Pre-save middleware
+// Pre-save middleware to ensure options have _id
 formFieldSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  
+  // Ensure all options have _id
+  if (this.options && Array.isArray(this.options)) {
+    this.options = this.options.map(option => {
+      if (!option._id) {
+        option._id = new mongoose.Types.ObjectId();
+      }
+      return option;
+    });
+  }
+  
   next();
 });
 
 datalistSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  
+  // Ensure all options have _id
+  if (this.options && Array.isArray(this.options)) {
+    this.options = this.options.map(option => {
+      if (!option._id) {
+        option._id = new mongoose.Types.ObjectId();
+      }
+      return option;
+    });
+  }
+  
   next();
 });
 

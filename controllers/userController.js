@@ -219,6 +219,9 @@ const loginSchema = Joi.object({
 // Dynamic validation helper
 const validateDynamicFields = async (formData) => {
   try {
+    console.log("🔍 Validating dynamic fields with multi-select support...");
+    
+    // Fetch active required fields (including checkbox groups)
     const activeFields = await FormField.find({ 
       isActive: true, 
       $or: [{ isRequired: true }, { 'validation.required': true }] 
@@ -229,33 +232,138 @@ const validateDynamicFields = async (formData) => {
 
     activeFields.forEach(field => {
       const value = formData?.[field.name];
+      const isCheckboxGroup = field.type === 'checkbox' && field.isMultiple;
+      const isMultiSelect = field.isMultiple;
       
+      console.log(`🔍 Validating: ${field.name}`, {
+        type: field.type,
+        isCheckboxGroup,
+        isMultiSelect,
+        value,
+        isRequired: field.isRequired || field.validation?.required
+      });
+
       // Check required fields
-      if ((field.isRequired || field.validation?.required) && (!value || value.toString().trim() === '')) {
-        missingFields.push(field.label || field.name);
-        errors[field.name] = `${field.label || field.name} is required`;
+      if (field.isRequired || field.validation?.required) {
+        if (isCheckboxGroup || isMultiSelect) {
+          // Handle multi-select fields validation
+          let hasValue = false;
+          
+          if (typeof value === 'string') {
+            // If it's a comma-separated string, split and check
+            const values = value.split(',').map(v => v.trim()).filter(v => v !== '');
+            hasValue = values.length > 0;
+          } else if (Array.isArray(value)) {
+            // If it's an array, check if it has any non-empty items
+            hasValue = value.length > 0 && value.some(item => 
+              item !== undefined && 
+              item !== null && 
+              item.toString().trim() !== ''
+            );
+          } else {
+            // For other types (null, undefined, etc.)
+            hasValue = false;
+          }
+          
+          if (!hasValue) {
+            missingFields.push(field.label || field.name);
+            errors[field.name] = field.validation?.message || `${field.label || field.name} is required`;
+            console.log(`❌ Multi-select required field failed: ${field.name}`, { value });
+          }
+        } else {
+          // Handle single value fields
+          if (!value || value.toString().trim() === '') {
+            missingFields.push(field.label || field.name);
+            errors[field.name] = field.validation?.message || `${field.label || field.name} is required`;
+            console.log(`❌ Single required field failed: ${field.name}`, { value });
+          }
+        }
       }
 
-      // Validate min length
-      if (value && field.validation?.minLength && value.toString().trim().length < field.validation.minLength) {
-        errors[field.name] = field.validation.message || `Minimum ${field.validation.minLength} characters required`;
+      // Skip further validation if no value
+      if (!value) {
+        return;
       }
 
-      // Validate max length
-      if (value && field.validation?.maxLength && value.toString().trim().length > field.validation.maxLength) {
-        errors[field.name] = field.validation.message || `Maximum ${field.validation.maxLength} characters allowed`;
-      }
+      // For checkbox groups (multiple selection), validate each value
+      if (isCheckboxGroup && typeof value === 'string') {
+        const values = value.split(',').map(v => v.trim()).filter(v => v !== '');
+        
+        // Check min length if specified
+        if (field.validation?.minLength && values.length < field.validation.minLength) {
+          errors[field.name] = field.validation.message || `Select at least ${field.validation.minLength} options`;
+          console.log(`❌ Checkbox min length validation failed: ${field.name}`, { 
+            selectedCount: values.length, 
+            required: field.validation.minLength 
+          });
+        }
 
-      // Validate pattern
-      if (value && field.validation?.pattern && !new RegExp(field.validation.pattern).test(value.toString().trim())) {
-        errors[field.name] = field.validation.message || "Invalid format";
+        // Check max length if specified
+        if (field.validation?.maxLength && values.length > field.validation.maxLength) {
+          errors[field.name] = field.validation.message || `Select at most ${field.validation.maxLength} options`;
+          console.log(`❌ Checkbox max length validation failed: ${field.name}`, { 
+            selectedCount: values.length, 
+            allowed: field.validation.maxLength 
+          });
+        }
+      } else {
+        // For single value fields
+        const stringValue = value.toString().trim();
+        
+        if (stringValue === "") return;
+
+        // Validate min length
+        if (field.validation?.minLength && stringValue.length < field.validation.minLength) {
+          errors[field.name] = field.validation.message || `Minimum ${field.validation.minLength} characters required`;
+          console.log(`❌ Min length validation failed: ${field.name}`, { 
+            currentLength: stringValue.length, 
+            required: field.validation.minLength 
+          });
+        }
+
+        // Validate max length
+        if (field.validation?.maxLength && stringValue.length > field.validation.maxLength) {
+          errors[field.name] = field.validation.message || `Maximum ${field.validation.maxLength} characters allowed`;
+          console.log(`❌ Max length validation failed: ${field.name}`, { 
+            currentLength: stringValue.length, 
+            allowed: field.validation.maxLength 
+          });
+        }
+
+        // Validate pattern
+        if (field.validation?.pattern) {
+          const pattern = new RegExp(field.validation.pattern);
+          if (!pattern.test(stringValue)) {
+            errors[field.name] = field.validation.patternMessage || field.validation.message || "Invalid format";
+            console.log(`❌ Pattern validation failed: ${field.name}`, { 
+              value: stringValue, 
+              pattern: field.validation.pattern 
+            });
+          }
+        }
       }
     });
 
-    return { missingFields, errors, isValid: missingFields.length === 0 && Object.keys(errors).length === 0 };
+    console.log("✅ Validation result:", {
+      isValid: missingFields.length === 0 && Object.keys(errors).length === 0,
+      missingFieldsCount: missingFields.length,
+      errorCount: Object.keys(errors).length,
+      missingFields,
+      errors
+    });
+
+    return { 
+      missingFields, 
+      errors, 
+      isValid: missingFields.length === 0 && Object.keys(errors).length === 0 
+    };
   } catch (error) {
     console.error("❌ Dynamic validation error:", error);
-    return { missingFields: [], errors: {}, isValid: true }; // Fallback to allow submission
+    return { 
+      missingFields: [], 
+      errors: { system: "Validation system error: " + error.message }, 
+      isValid: false 
+    };
   }
 };
 
@@ -667,8 +775,7 @@ export const login = async (req, res) => {
 };
 
 // 4.  Complete Registration with Dynamic Fields
-
-
+// Complete Registration with checkbox groups support
 export const completeRegistration = async (req, res) => {
   try {
     console.log("🔍 Complete registration request received");
@@ -681,12 +788,21 @@ export const completeRegistration = async (req, res) => {
       });
     }
 
-    // IMPORTANT: profileImages (array) not profileImage (single)
     const { formData, profileImages, documents } = req.body;
 
     console.log("📋 Form data received:", Object.keys(formData || {}));
     console.log("🖼️ Profile images count:", profileImages ? profileImages.length : 0);
     console.log("📄 Documents count:", documents ? documents.length : 0);
+
+    // Check for checkbox groups data
+    Object.keys(formData || {}).forEach(key => {
+      const value = formData[key];
+      if (Array.isArray(value)) {
+        console.log(`✅ Checkbox group detected: ${key} = ${value.join(', ')}`);
+      } else if (typeof value === 'string' && value.includes(',')) {
+        console.log(`✅ Comma-separated checkbox group: ${key} = ${value}`);
+      }
+    });
 
     // Validate profile images array
     if (!profileImages || !Array.isArray(profileImages) || profileImages.length === 0) {
@@ -713,7 +829,7 @@ export const completeRegistration = async (req, res) => {
       });
     }
 
-    // Validate dynamic fields
+    // Validate dynamic fields (with checkbox group support)
     const validation = await validateDynamicFields(formData);
     if (!validation.isValid) {
       return res.status(400).json({
@@ -807,16 +923,27 @@ export const completeRegistration = async (req, res) => {
     const additionalImages = profileImagesData.slice(1).map(img => img.url);
     const additionalImagePublicIds = profileImagesData.slice(1).map(img => img.publicId);
 
-    // Update formData with additional images if needed
-    const updatedFormData = {
-      ...formData,
-      additionalImages: additionalImages,
-    };
+    // Process formData to ensure checkbox groups are properly stored
+    const processedFormData = { ...formData };
+    
+    // Convert any array values to comma-separated strings for storage
+    Object.keys(processedFormData).forEach(key => {
+      const value = processedFormData[key];
+      if (Array.isArray(value)) {
+        processedFormData[key] = value.join(',');
+        console.log(`🔄 Converted array to string for ${key}: ${processedFormData[key]}`);
+      }
+    });
+
+    // Add additional images if needed
+    if (additionalImages.length > 0) {
+      processedFormData.additionalImages = additionalImages;
+    }
 
     // Update user with all data
     const updateData = {
       ...essentialFields,
-      formData: new Map(Object.entries(updatedFormData)),
+      formData: new Map(Object.entries(processedFormData)),
       
       // For backward compatibility - single image
       profileImage: profileImagesData[0]?.url || '',
@@ -851,6 +978,9 @@ export const completeRegistration = async (req, res) => {
 
     console.log(`✅ Registration completed for VIV ID: ${updatedUser.vivId}`);
     console.log(`📸 Successfully uploaded ${profileImagesData.length} profile images`);
+    console.log(`✅ Checkbox groups stored: ${Object.keys(processedFormData).filter(key => 
+      processedFormData[key] && typeof processedFormData[key] === 'string' && processedFormData[key].includes(',')
+    ).join(', ')}`);
 
     // Convert formData for response
     let formDataObject = {};

@@ -109,5 +109,4 @@ router.get('/wedding-form/status', userMiddleware, getWeddingFormStatus);
 router.get('/check-contact', checkContactExists);
 
 
-
 export default router;

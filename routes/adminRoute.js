@@ -71,7 +71,8 @@ import {
   toggleDatalistOption,
   getFormConfiguration,
   exportFormConfiguration,
-  importFormConfiguration
+  importFormConfiguration,
+  migrateFieldType
 } from "../controllers/dynamicFormController.js";
 
 import {
@@ -360,5 +361,9 @@ router.get("/contact-info/debug-db", adminMiddleware, async (req, res) => {
 // Admin routes
 router.get('/weddings/users' , getAllWeddingUsers);
 router.delete('/weddings/users/:id', deleteWeddingUser);
+
+
+// Field Type Migration Route (Admin only)
+router.patch('/form-fields/:fieldId/migrate-type', adminMiddleware, migrateFieldType);
 
 export default router;
