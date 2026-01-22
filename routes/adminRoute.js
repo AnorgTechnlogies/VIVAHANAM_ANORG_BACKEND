@@ -1,5 +1,6 @@
 import express from "express";
-import adminMiddleware from "../middleware/adminMiddleware.js";const router = express.Router();
+import adminMiddleware from "../middleware/adminMiddleware.js";
+const router = express.Router();
 
 
 import {
@@ -89,6 +90,8 @@ import {
   getRealTimeActiveUsers,
   checkNewUsers
 } from "../controllers/dashboardController.js";
+
+import { getAllPlanPurchases } from "../controllers/paymentController.js";
 
 import MatchmakingPlan from "../models/MatchmakingPlan.js";
 
@@ -365,5 +368,7 @@ router.delete('/weddings/users/:id', deleteWeddingUser);
 
 // Field Type Migration Route (Admin only)
 router.patch('/form-fields/:fieldId/migrate-type', adminMiddleware, migrateFieldType);
+
+router.get("/plan-purchases", adminMiddleware, getAllPlanPurchases);
 
 export default router;

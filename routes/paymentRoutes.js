@@ -4,7 +4,7 @@ import {
   capturePayPalOrder,
   getUserTransactions,
   getTransactionById,
-  getAllPlanPurchases,
+  // getAllPlanPurchases,
   deletePaymentRecord,
   getUserPaymentHistory,
   getPaymentSummary,
@@ -24,7 +24,7 @@ router.get("/transactions/:vivId", userMiddleware, getUserTransactions);
 router.get("/transaction/:transactionId", userMiddleware, getTransactionById);
 
 // ✅ ADMIN DASHBOARD ROUTES - Use adminMiddleware only
-router.get("/plan-purchases", adminMiddleware, getAllPlanPurchases);
+// router.get("/plan-purchases", adminMiddleware, getAllPlanPurchases);
 
 // ✅ User payment management routes
 router.get("/history/:vivId", userMiddleware, getUserPaymentHistory);
