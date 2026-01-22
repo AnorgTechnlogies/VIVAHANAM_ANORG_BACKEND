@@ -30,10 +30,10 @@ router.get("/transaction/:transactionId", userMiddleware, getTransactionById);
 router.get("/history/:vivId", userMiddleware, getUserPaymentHistory);
 router.get("/summary/:vivId", userMiddleware, getPaymentSummary);
 
-// ✅ Delete payment record (admin only - fixed middleware)
-router.delete("/:transactionId", adminMiddleware, deletePaymentRecord);
+// // ✅ Delete payment record (admin only - fixed middleware)
+// router.delete("/:transactionId", adminMiddleware, deletePaymentRecord);
 
-// ✅ Download PDF (both admin and user)
-router.get("/pdf/:transactionId", userMiddleware, downloadTransactionPDF);
+// // ✅ Download PDF (both admin and user)
+// router.get("/pdf/:transactionId", userMiddleware, downloadTransactionPDF);
 
 export default router;

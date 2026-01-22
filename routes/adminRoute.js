@@ -1,5 +1,7 @@
 import express from "express";
 import adminMiddleware from "../middleware/adminMiddleware.js";
+import userMiddleware from "../middleware/userMiddleware.js";
+
 const router = express.Router();
 
 
@@ -91,10 +93,10 @@ import {
   checkNewUsers
 } from "../controllers/dashboardController.js";
 
-import { getAllPlanPurchases } from "../controllers/paymentController.js";
+import { getAllPlanPurchases,downloadTransactionPDF,deletePaymentRecord } from "../controllers/paymentController.js";
 
 import MatchmakingPlan from "../models/MatchmakingPlan.js";
-
+import User from "../models/userModel.js";  // ✅ ADD THIS LINE
 
 // ==========================================================
 // HEALTH CHECK ENDPOINT
@@ -369,6 +371,112 @@ router.delete('/weddings/users/:id', deleteWeddingUser);
 // Field Type Migration Route (Admin only)
 router.patch('/form-fields/:fieldId/migrate-type', adminMiddleware, migrateFieldType);
 
+
+// ✅ ADMIN DASHBOARD ROUTES - Use adminMiddleware only
 router.get("/plan-purchases", adminMiddleware, getAllPlanPurchases);
+
+// ✅ Delete payment record (admin only - fixed middleware)
+router.delete("/:transactionId", adminMiddleware, deletePaymentRecord);
+
+// ✅ Download PDF (both admin and user)
+router.get("/pdf/:transactionId", userMiddleware, downloadTransactionPDF);
+
+/* ==========================================================
+   1️⃣2️⃣ USER MANAGEMENT - DELETE USER (ADMIN ONLY)
+   ========================================================== */
+
+// ✅ GET USER BY ID FOR ADMIN (VIEW DETAILS)
+router.get('/user/:id', adminMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const user = await User.findById(id)
+      .select('-password -verificationCode -resetPasswordCode')
+      .lean();
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Process formData for easy access
+    const userData = {
+      ...user,
+      ...(user.formData || {})
+    };
+
+    res.status(200).json({
+      success: true,
+      data: userData
+    });
+
+  } catch (error) {
+    console.error('Get user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+});
+
+// ✅ ADMIN DELETE USER ROUTE
+router.delete('/user/:id', adminMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const admin = req.admin;
+    
+    console.log(`🗑️ Admin ${admin.adminEmailId} attempting to delete user ID: ${id}`);
+
+    // Check if user exists
+    const user = await User.findById(id);
+    if (!user) {
+      console.log(`❌ User ${id} not found`);
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    console.log(`👤 Found user: ${user.name} (${user.vivId})`);
+
+    // Optional: Prevent admin from deleting themselves or other admins
+    if (user.role === 'admin') {
+      console.log(`⛔ Cannot delete admin user: ${user.email}`);
+      return res.status(403).json({
+        success: false,
+        message: 'Cannot delete admin user'
+      });
+    }
+
+    // Delete user from database
+    await User.findByIdAndDelete(id);
+
+    // Log the deletion
+    console.log(`✅ User ${user.email} (${user.vivId}) deleted by admin ${admin.adminEmailId}`);
+
+    res.status(200).json({
+      success: true,
+      message: 'User deleted successfully',
+      data: {
+        deletedUserId: id,
+        deletedUserVivId: user.vivId,
+        deletedUserName: user.name,
+        deletedUserEmail: user.email,
+        deletedByAdmin: admin.adminEmailId,
+        timestamp: new Date().toISOString()
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Delete user error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while deleting user'
+    });
+  }
+});
+
 
 export default router;

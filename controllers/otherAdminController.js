@@ -1426,3 +1426,4 @@ export const deleteWeddingUser = async (req, res) => {
     });
   }
 };
+
