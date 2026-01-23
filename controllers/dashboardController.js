@@ -230,6 +230,11 @@ const getUserSessionInfoHelper = (user) => {
 };
 
 // ==================== ENHANCED USER FETCHING FOR DASHBOARD ====================
+// dashboardController.js में नीचे getUsersForDashboard function को replace करें:
+
+// ==================== ENHANCED USER FETCHING FOR DASHBOARD ====================
+// ==================== ENHANCED USER FETCHING FOR DASHBOARD ====================
+// ==================== ENHANCED USER FETCHING FOR DASHBOARD ====================
 export const getUsersForDashboard = async (req, res) => {
   try {
     const { 
@@ -245,7 +250,7 @@ export const getUsersForDashboard = async (req, res) => {
 
     let query = {};
 
-    // Apply filters based on type - Enhanced with real-time active status
+    // Apply filters based on type
     switch (type) {
       case 'unverified':
         query.isVerified = false;
@@ -259,7 +264,6 @@ export const getUsersForDashboard = async (req, res) => {
         query.profileCompleted = true;
         break;
       case 'active':
-        // Users with active sessions or recent activity
         query.isVerified = true;
         query.$or = [
           { 
@@ -273,7 +277,6 @@ export const getUsersForDashboard = async (req, res) => {
         ];
         break;
       case 'online':
-        // Real-time online users (active in last 2 minutes)
         query.isVerified = true;
         query.$or = [
           { 
@@ -313,17 +316,20 @@ export const getUsersForDashboard = async (req, res) => {
         break;
     }
 
+    // Search functionality - including formData fields
     if (search && search.trim() !== "") {
       const searchRegex = { $regex: search, $options: "i" };
       query.$or = [
         { name: searchRegex },
         { email: searchRegex },
         { vivId: searchRegex },
-        { mobileNo: searchRegex },
-        { firstName: searchRegex },
-        { lastName: searchRegex },
-        { city: searchRegex },
-        { state: searchRegex }
+        { "formData.mobileNo": searchRegex },
+        { "formData.firstName": searchRegex },
+        { "formData.lastName": searchRegex },
+        { "formData.city": searchRegex },
+        { "formData.state": searchRegex },
+        { "formData.fatherName": searchRegex },
+        { "formData.motherName": searchRegex }
       ];
     }
 
@@ -343,14 +349,77 @@ export const getUsersForDashboard = async (req, res) => {
 
     // Enhanced user status with real-time active check
     const enhancedUsers = users.map(user => {
+      // Extract formData fields - ONLY WHAT USERS ACTUALLY FILL
+      const formData = user.formData || {};
+      
+      // Check if user is online/active
       const isOnlineNow = isUserOnlineNow(user);
       const isActive = isUserCurrentlyActive(user);
       const sessionInfo = getUserSessionInfoHelper(user);
       
+      // Calculate age from dateOfBirth ONLY if it exists
+      const calculateAgeFromDOB = (dob) => {
+        if (!dob || dob === '' || dob === 'Not Filled') return null;
+        try {
+          const birthDate = new Date(dob);
+          const today = new Date();
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const monthDiff = today.getMonth() - birthDate.getMonth();
+          if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+          }
+          return age;
+        } catch (error) {
+          return null;
+        }
+      };
+      
+      // Calculate age ONLY if dateOfBirth exists
+      const age = formData.dateOfBirth ? calculateAgeFromDOB(formData.dateOfBirth) : null;
+      
+      // Create full name from available parts
+      const nameParts = [];
+      if (formData.firstName && formData.firstName !== 'Not Filled') nameParts.push(formData.firstName);
+      if (formData.middleName && formData.middleName !== 'Not Filled') nameParts.push(formData.middleName);
+      if (formData.lastName && formData.lastName !== 'Not Filled') nameParts.push(formData.lastName);
+      const fullName = nameParts.length > 0 ? nameParts.join(' ') : user.name;
+
+      // Return user data with ACTUAL formData fields (no extra fields)
       return {
-        ...user,
-        age: calculateAge(user.dateOfBirth),
-        fullName: [user.firstName, user.middleName, user.lastName].filter(Boolean).join(' ').trim() || user.name,
+        _id: user._id,
+        vivId: user.vivId,
+        name: user.name,
+        email: user.email,
+        isVerified: user.isVerified,
+        profileCompleted: user.profileCompleted,
+        role: user.role,
+        currentPlan: user.currentPlan,
+        planExpiresAt: user.planExpiresAt,
+        isPremium: user.isPremium,
+        lastPlanActivated: user.lastPlanActivated,
+        currentPlanProfilesTotal: user.currentPlanProfilesTotal,
+        currentPlanProfilesUsed: user.currentPlanProfilesUsed,
+        currentPlanProfilesRemaining: user.currentPlanProfilesRemaining,
+        profileImage: user.profileImage,
+        profileImagePublicId: user.profileImagePublicId,
+        profileImagesCount: user.profileImagesCount,
+        additionalImages: user.additionalImages || [],
+        additionalImagePublicIds: user.additionalImagePublicIds || [],
+        documents: user.documents || [],
+        documentPublicIds: user.documentPublicIds || [],
+        lastProfileUpdate: user.lastProfileUpdate,
+        profileImages: user.profileImages || [],
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        lastLogin: user.lastLogin,
+        lastLogout: user.lastLogout,
+        
+        // User-filled form data (ONLY actual fields from form)
+        formData: formData,
+        
+        // Calculated fields (only if they make sense)
+        age: age,
+        fullName: fullName,
         lastActive: user.lastLogin ? formatTimeAgo(user.lastLogin) : 'Never',
         userStatus: getUserEnhancedStatus(user),
         profileStatus: getProfileStatus(user),
@@ -363,8 +432,8 @@ export const getUsersForDashboard = async (req, res) => {
           loginTime: sessionInfo.loginTime,
           lastActive: sessionInfo.lastActive,
           activityCount: sessionInfo.activityCount,
-          sessionDuration: Math.round((new Date() - new Date(sessionInfo.loginTime)) / 60000) // minutes
-        } : null
+          sessionDuration: Math.round((new Date() - new Date(sessionInfo.loginTime)) / 60000)
+        } : null,
       };
     });
 
